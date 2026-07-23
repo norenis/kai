@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,13 +33,15 @@ var templateFS embed.FS
 
 // Server serves the brain dashboard.
 type Server struct {
-	brain        *brain.FileBrain
-	brainPath    string
-	cfg          *config.Config
-	sessions     sync.Map // token → expiry (unix seconds)
-	sessionsMu   sync.Mutex
-	syncer       *bsync.Syncer
-	router       *router.Router
+	brain       *brain.FileBrain
+	brainPath   string
+	cfg         *config.Config
+	sessions    sync.Map // token → expiry (unix seconds)
+	sessionsMu  sync.Mutex
+	syncer      *bsync.Syncer
+	router      *router.Router
+	oidc        *oidcAuth
+	oauthStates sync.Map // state → expiry (unix seconds), CSRF protection for the OIDC login round-trip
 }
 
 // SetRouter sets the router for dashboard chat.
@@ -50,6 +53,18 @@ func (s *Server) SetRouter(r *router.Router) {
 func New(b *brain.FileBrain, brainPath string, cfg *config.Config) *Server {
 	s := &Server{brain: b, brainPath: brainPath, cfg: cfg}
 	s.loadSessions()
+
+	if cfg.Server.SSO.Enabled() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		oa, err := newOIDCAuth(ctx, cfg.Server.SSO)
+		if err != nil {
+			slog.Warn("sso disabled: failed to initialize oidc provider", "issuer", cfg.Server.SSO.Issuer, "err", err)
+		} else {
+			s.oidc = oa
+		}
+	}
+
 	return s
 }
 
@@ -128,10 +143,12 @@ func (s *Server) ListenAndServe(addr string) error {
 
 // RegisterRoutes registers dashboard routes on the given mux at /.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
-	// PIN auth endpoints (no auth required).
+	// Auth endpoints (no auth required).
 	mux.HandleFunc("/api/auth", s.handleAuth)
+	mux.HandleFunc("/api/auth/oidc/login", s.handleOIDCLogin)
+	mux.HandleFunc("/api/auth/oidc/callback", s.handleOIDCCallback)
 
-	// All other routes require PIN if configured.
+	// All other routes require PIN/SSO if configured.
 	auth := s.withAuth
 	mux.HandleFunc("/", auth(s.handleIndex))
 	mux.HandleFunc("/api/overview", auth(s.handleOverview))
@@ -161,11 +178,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/plugins/run", auth(s.handlePluginRun))
 }
 
-// withAuth wraps a handler with PIN authentication if configured.
+// withAuth wraps a handler with PIN and/or SSO authentication if configured.
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		pin := s.cfg.Server.DashboardPIN
-		if pin == "" {
+		if s.cfg.Server.DashboardPIN == "" && s.oidc == nil {
 			next(w, r)
 			return
 		}
@@ -203,8 +219,13 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 // handleAuth handles PIN verification.
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		// GET: check if auth is required.
-		writeJSON(w, map[string]bool{"required": s.cfg.Server.DashboardPIN != ""})
+		// GET: check which auth methods are available/required.
+		pinSet := s.cfg.Server.DashboardPIN != ""
+		writeJSON(w, map[string]bool{
+			"required": pinSet || s.oidc != nil,
+			"pin":      pinSet,
+			"sso":      s.oidc != nil,
+		})
 		return
 	}
 
@@ -221,7 +242,13 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate session token.
+	s.startSession(w)
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// startSession creates a new session token, stores it, and sets the session
+// cookie. Used after both PIN and SSO login succeed.
+func (s *Server) startSession(w http.ResponseWriter) {
 	token := generateToken()
 	expiry := time.Now().Add(7 * 24 * time.Hour).Unix()
 	s.sessions.Store(token, expiry)
@@ -235,8 +262,6 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   7 * 24 * 3600,
 	})
-
-	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func generateToken() string {
@@ -336,26 +361,42 @@ func (s *Server) handleTasksGet(w http.ResponseWriter, r *http.Request) {
 		Items []brain.TaskItem `json:"items"`
 	}
 
-	// Find today's tasks file or the most recent one.
-	tasksDir := filepath.Join(s.brainPath, "tasks")
-	files, _ := filepath.Glob(filepath.Join(tasksDir, "*.md"))
-	if len(files) == 0 {
-		writeJSON(w, response{Items: []brain.TaskItem{}})
-		return
+	// Prefer today's tasks file; otherwise the most recent DATE-named file.
+	// The tasks/ dir may also contain non-dated notes categorized as "tasks"
+	// (e.g. planning notes) — those are not daily task lists and must not be
+	// picked here, or ParseTasks yields nil and the dashboard shows nothing.
+	candidate := brain.TaskFilePath(time.Now())
+	if _, err := os.Stat(filepath.Join(s.brainPath, candidate)); err != nil {
+		tasksDir := filepath.Join(s.brainPath, "tasks")
+		files, _ := filepath.Glob(filepath.Join(tasksDir, "*.md"))
+		var dated []string
+		for _, f := range files {
+			name := strings.TrimSuffix(filepath.Base(f), ".md")
+			if _, perr := time.Parse(brain.DateFormat, name); perr == nil {
+				dated = append(dated, f)
+			}
+		}
+		if len(dated) == 0 {
+			writeJSON(w, response{Items: []brain.TaskItem{}})
+			return
+		}
+		// Sort descending to get the most recent date first.
+		sort.Sort(sort.Reverse(sort.StringSlice(dated)))
+		candidate = "tasks/" + filepath.Base(dated[0])
 	}
 
-	// Sort descending to get the most recent date first.
-	sort.Sort(sort.Reverse(sort.StringSlice(files)))
-
-	bf, err := s.brain.Load("tasks/" + filepath.Base(files[0]))
+	bf, err := s.brain.Load(candidate)
 	if err != nil {
 		writeJSON(w, response{Items: []brain.TaskItem{}})
 		return
 	}
 
-	writeJSON(w, response{Items: brain.ParseTasks(bf.Content)})
+	items := brain.ParseTasks(bf.Content)
+	if items == nil {
+		items = []brain.TaskItem{}
+	}
+	writeJSON(w, response{Items: items})
 }
-
 func (s *Server) handleTasksToggle(w http.ResponseWriter, r *http.Request) {
 	type toggleReq struct {
 		Index int  `json:"index"`
