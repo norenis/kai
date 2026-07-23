@@ -64,8 +64,26 @@ type AgentConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	ListenAddr   string `yaml:"listen_addr"`
-	DashboardPIN string `yaml:"dashboard_pin"` // PIN lock for dashboard (empty = no auth)
+	ListenAddr   string    `yaml:"listen_addr"`
+	DashboardPIN string    `yaml:"dashboard_pin"` // PIN lock for dashboard (empty = no auth)
+	SSO          SSOConfig `yaml:"sso"`
+}
+
+// SSOConfig holds OIDC single sign-on settings for the dashboard. Works with
+// any OIDC-compliant provider (Dex, Okta, Azure AD, Google, ...) — Dex in
+// particular speaks OIDC to client apps regardless of the upstream identity
+// source (SAML, LDAP, GitHub, etc.) it federates to.
+type SSOConfig struct {
+	Issuer       string   `yaml:"issuer"` // OIDC issuer URL, e.g. https://dex.example.com
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret string   `yaml:"client_secret"`
+	RedirectURL  string   `yaml:"redirect_url"` // must match a redirect URI registered with the provider
+	Scopes       []string `yaml:"scopes"`       // default: openid, profile, email
+}
+
+// Enabled reports whether SSO is configured.
+func (c SSOConfig) Enabled() bool {
+	return c.Issuer != "" && c.ClientID != ""
 }
 
 // ProviderConfig holds per-provider settings.
@@ -87,8 +105,16 @@ type BrainConfig struct {
 
 // EmbedConfig holds embedding settings for vector search.
 type EmbedConfig struct {
-	Provider string       `yaml:"provider"` // "ollama" or "lsi" (default: auto — tries ollama, falls back to lsi)
+	Provider string       `yaml:"provider"` // "ollama", "gemini" or "lsi" (default: auto — tries ollama, falls back to lsi)
 	Ollama   OllamaConfig `yaml:"ollama"`
+	Gemini   GeminiConfig `yaml:"gemini"`
+}
+
+// GeminiConfig holds Google Gemini embedding settings.
+type GeminiConfig struct {
+	APIKey  string `yaml:"api_key"`  // Google AI Studio API key (supports ${ENV})
+	Model   string `yaml:"model"`    // Embedding model (default: text-embedding-004)
+	BaseURL string `yaml:"base_url"` // Override API base (optional)
 }
 
 // OllamaConfig holds Ollama embedding settings.

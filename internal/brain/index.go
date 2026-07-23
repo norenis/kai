@@ -219,104 +219,15 @@ func (b *FileBrain) rebuildFullIndex() error {
 		InvertedIndex: make(map[string][]Posting),
 	}
 
-	var totalDocWords, totalChunkWords int
-
 	for _, f := range files {
 		bf, err := b.loadCached(f)
 		if err != nil {
 			continue
 		}
-
-		content := strings.TrimSpace(bf.Content)
-		contentTokens := tokenizeAndStem(content)
-		docWordCount := len(contentTokens)
-		totalDocWords += docWordCount
-
-		// Chunk the content.
-		chunks := chunkContent(content, ChunkTargetWords)
-		if len(chunks) == 0 {
-			chunks = []Chunk{{Text: content, Offset: 0, Length: len(content), WordCount: docWordCount}}
-		}
-
-		idx.Documents[f] = DocEntry{
-			Path:        f,
-			WordCount:   docWordCount,
-			Tags:        bf.Tags,
-			Updated:     bf.Updated.Time.Format(DateFormat),
-			AccessCount: bf.AccessCount,
-			ChunkCount:  len(chunks),
-			Confidence:  bf.Confidence,
-		}
-		idx.TotalDocs++
-
-		// Index each chunk's content terms.
-		for ci, ch := range chunks {
-			chunkKey := fmt.Sprintf("%s#%d", f, ci)
-			chunkTokens := tokenizeAndStem(ch.Text)
-			chunkWordCount := len(chunkTokens)
-			totalChunkWords += chunkWordCount
-
-			idx.Chunks[chunkKey] = ChunkEntry{
-				DocPath:   f,
-				ChunkID:   ci,
-				WordCount: chunkWordCount,
-				Offset:    ch.Offset,
-				Length:    ch.Length,
-			}
-			idx.TotalChunks++
-
-			freq := make(map[string]int)
-			for _, t := range chunkTokens {
-				freq[t]++
-			}
-			for term, count := range freq {
-				idx.InvertedIndex[term] = append(idx.InvertedIndex[term], Posting{
-					Path:      f,
-					Frequency: count,
-					Field:     "content",
-					ChunkKey:  chunkKey,
-				})
-			}
-		}
-
-		// Index tag terms (document-level, no ChunkKey).
-		tagFreq := make(map[string]int)
-		for _, tag := range bf.Tags {
-			for _, t := range tokenizeAndStem(tag) {
-				tagFreq[t]++
-			}
-		}
-		for term, count := range tagFreq {
-			idx.InvertedIndex[term] = append(idx.InvertedIndex[term], Posting{
-				Path:      f,
-				Frequency: count,
-				Field:     "tag",
-			})
-		}
-
-		// Index path segments (document-level, no ChunkKey).
-		pathSegments := strings.Split(strings.TrimSuffix(f, ".md"), string(filepath.Separator))
-		pathFreq := make(map[string]int)
-		for _, seg := range pathSegments {
-			for _, t := range tokenizeAndStem(seg) {
-				pathFreq[t]++
-			}
-		}
-		for term, count := range pathFreq {
-			idx.InvertedIndex[term] = append(idx.InvertedIndex[term], Posting{
-				Path:      f,
-				Frequency: count,
-				Field:     "path",
-			})
-		}
+		indexFileIntoBM25(idx, f, bf)
 	}
 
-	if idx.TotalDocs > 0 {
-		idx.AvgDocLength = float64(totalDocWords) / float64(idx.TotalDocs)
-	}
-	if idx.TotalChunks > 0 {
-		idx.AvgChunkLength = float64(totalChunkWords) / float64(idx.TotalChunks)
-	}
+	recomputeAverages(idx)
 
 	slog.Debug("full BM25 index built", "docs", idx.TotalDocs, "chunks", idx.TotalChunks)
 	if err := b.saveFullIndex(idx); err != nil {
@@ -328,7 +239,7 @@ func (b *FileBrain) rebuildFullIndex() error {
 
 	// Snapshot chunk texts while the file cache is warm and lock is held.
 	// This lets us release the write lock before the slow Ollama API calls.
-	chunkTexts := b.snapshotChunkTexts(idx)
+	chunkTexts := b.snapshotChunkTexts(idx, nil)
 
 	// Release write lock so brain reads (dashboard, queries) are not blocked
 	// during the potentially long vector embedding step.
@@ -353,41 +264,22 @@ func (b *FileBrain) rebuildFullIndex() error {
 	return nil
 }
 
-// snapshotChunkTexts pre-extracts all chunk text strings while the file cache
-// is populated and the lock is held. The result is passed to buildVecIndexUnlocked
-// so that no file I/O is needed after the write lock is released.
-func (b *FileBrain) snapshotChunkTexts(idx *FullIndex) map[string]string {
+// snapshotChunkTexts pre-extracts chunk text strings while the file cache is
+// populated and the lock is held, so that no file I/O is needed after the
+// write lock is released. If paths is non-nil, only chunks whose DocPath is
+// in paths are included; nil means all chunks.
+func (b *FileBrain) snapshotChunkTexts(idx *FullIndex, paths []string) map[string]string {
+	var pathSet map[string]bool
+	if paths != nil {
+		pathSet = make(map[string]bool, len(paths))
+		for _, p := range paths {
+			pathSet[p] = true
+		}
+	}
+
 	texts := make(map[string]string, len(idx.Chunks))
 	for chunkKey, ce := range idx.Chunks {
-		bf, err := b.loadCached(ce.DocPath)
-		if err != nil {
-			continue
-		}
-		content := strings.TrimSpace(bf.Content)
-		chunkText := safeSubstring(content, ce.Offset, ce.Length)
-		if chunkText == "" {
-			continue
-		}
-		doc := idx.Documents[ce.DocPath]
-		prefix := ""
-		if len(doc.Tags) > 0 {
-			prefix = "Tags: " + strings.Join(doc.Tags, ", ") + ". "
-		}
-		texts[chunkKey] = prefix + chunkText
-	}
-	return texts
-}
-
-// snapshotChunkTextsForPaths is like snapshotChunkTexts but only extracts
-// chunk texts for chunks whose DocPath is in the provided paths set.
-func (b *FileBrain) snapshotChunkTextsForPaths(idx *FullIndex, paths []string) map[string]string {
-	pathSet := make(map[string]bool, len(paths))
-	for _, p := range paths {
-		pathSet[p] = true
-	}
-	texts := make(map[string]string)
-	for chunkKey, ce := range idx.Chunks {
-		if !pathSet[ce.DocPath] {
+		if pathSet != nil && !pathSet[ce.DocPath] {
 			continue
 		}
 		bf, err := b.loadCached(ce.DocPath)
@@ -414,11 +306,13 @@ func (b *FileBrain) snapshotChunkTextsForPaths(idx *FullIndex, paths []string) m
 func (b *FileBrain) buildVecIndexUnlocked(ctx context.Context, idx *FullIndex, chunkTexts map[string]string) *VecIndex {
 	switch b.embed.Provider {
 	case EmbedOllama:
-		return b.tryOllamaEmbedUnlocked(ctx, idx, chunkTexts)
+		return b.tryOllamaEmbedUnlocked(ctx, chunkTexts)
+	case EmbedGemini:
+		return b.tryGeminiEmbedUnlocked(ctx, chunkTexts)
 	case EmbedLSI:
 		return buildVecIndexLSI(idx)
 	default: // Auto: try Ollama, fall back to LSI.
-		if vi := b.tryOllamaEmbedUnlocked(ctx, idx, chunkTexts); vi != nil {
+		if vi := b.tryOllamaEmbedUnlocked(ctx, chunkTexts); vi != nil {
 			return vi
 		}
 		return buildVecIndexLSI(idx)
@@ -426,7 +320,7 @@ func (b *FileBrain) buildVecIndexUnlocked(ctx context.Context, idx *FullIndex, c
 }
 
 // tryOllamaEmbedUnlocked attempts Ollama embedding without holding the write lock.
-func (b *FileBrain) tryOllamaEmbedUnlocked(ctx context.Context, idx *FullIndex, chunkTexts map[string]string) *VecIndex {
+func (b *FileBrain) tryOllamaEmbedUnlocked(ctx context.Context, chunkTexts map[string]string) *VecIndex {
 	embedder := NewOllamaEmbedder(OllamaEmbedConfig{
 		URL:   b.embed.OllamaURL,
 		Model: b.embed.OllamaModel,
@@ -443,9 +337,43 @@ func (b *FileBrain) tryOllamaEmbedUnlocked(ctx context.Context, idx *FullIndex, 
 	b.mu.RUnlock()
 
 	slog.Debug("ollama embedder available, embedding chunks", "chunks", len(chunkTexts))
-	return buildVecIndexOllama(ctx, idx, embedder, existing, chunkTexts)
+	return buildVecIndexNeural(ctx, "ollama", embedder, existing, chunkTexts)
 }
 
+
+// tryGeminiEmbedUnlocked attempts Gemini embedding without holding the write lock.
+func (b *FileBrain) tryGeminiEmbedUnlocked(ctx context.Context, chunkTexts map[string]string) *VecIndex {
+	embedder := NewGeminiEmbedder(GeminiEmbedConfig{
+		BaseURL: b.embed.GeminiBaseURL,
+		Model:   b.embed.GeminiModel,
+		APIKey:  b.embed.GeminiAPIKey,
+	})
+	slog.Debug("checking gemini embedder availability", "model", b.embed.GeminiModel)
+	if !embedder.Available() {
+		slog.Debug("gemini embedder not available (missing key or unreachable), skipping vector index")
+		return nil
+	}
+
+	b.mu.RLock()
+	existing, _ := b.loadVecIndex()
+	b.mu.RUnlock()
+
+	slog.Debug("gemini embedder available, embedding chunks", "chunks", len(chunkTexts))
+	return buildVecIndexNeural(ctx, "gemini", embedder, existing, chunkTexts)
+}
+
+// queryEmbedder returns the neural embedder matching a vector index provider,
+// configured from the brain's embed options. Returns nil for LSI (no embedder).
+func (b *FileBrain) queryEmbedder(provider string) Embedder {
+	switch provider {
+	case "ollama":
+		return NewOllamaEmbedder(OllamaEmbedConfig{URL: b.embed.OllamaURL, Model: b.embed.OllamaModel})
+	case "gemini":
+		return NewGeminiEmbedder(GeminiEmbedConfig{BaseURL: b.embed.GeminiBaseURL, Model: b.embed.GeminiModel, APIKey: b.embed.GeminiAPIKey})
+	default:
+		return nil
+	}
+}
 
 // rebuildIndexIncremental is the internal implementation of RebuildIndexIncremental.
 func (b *FileBrain) rebuildIndexIncremental() error {
@@ -522,7 +450,7 @@ func (b *FileBrain) rebuildIndexIncremental() error {
 			return err
 		}
 	}
-	dirtyChunkTexts := b.snapshotChunkTextsForPaths(idx, dirty)
+	dirtyChunkTexts := b.snapshotChunkTexts(idx, dirty)
 
 	b.mu.RLock()
 	existingVI, _ := b.loadVecIndex()
@@ -621,85 +549,7 @@ func (b *FileBrain) updateFullIndexIncremental(dirty, deleted []string, newManif
 		if err != nil {
 			continue
 		}
-
-		content := strings.TrimSpace(bf.Content)
-		contentTokens := tokenizeAndStem(content)
-		docWordCount := len(contentTokens)
-
-		chunks := chunkContent(content, ChunkTargetWords)
-		if len(chunks) == 0 {
-			chunks = []Chunk{{Text: content, Offset: 0, Length: len(content), WordCount: docWordCount}}
-		}
-
-		existing.Documents[f] = DocEntry{
-			Path:        f,
-			WordCount:   docWordCount,
-			Tags:        bf.Tags,
-			Updated:     bf.Updated.Time.Format(DateFormat),
-			AccessCount: bf.AccessCount,
-			ChunkCount:  len(chunks),
-			Confidence:  bf.Confidence,
-		}
-		existing.TotalDocs++
-
-		for ci, ch := range chunks {
-			chunkKey := fmt.Sprintf("%s#%d", f, ci)
-			chunkTokens := tokenizeAndStem(ch.Text)
-			chunkWordCount := len(chunkTokens)
-
-			existing.Chunks[chunkKey] = ChunkEntry{
-				DocPath:   f,
-				ChunkID:   ci,
-				WordCount: chunkWordCount,
-				Offset:    ch.Offset,
-				Length:    ch.Length,
-			}
-			existing.TotalChunks++
-
-			freq := make(map[string]int)
-			for _, t := range chunkTokens {
-				freq[t]++
-			}
-			for term, count := range freq {
-				existing.InvertedIndex[term] = append(existing.InvertedIndex[term], Posting{
-					Path:      f,
-					Frequency: count,
-					Field:     "content",
-					ChunkKey:  chunkKey,
-				})
-			}
-		}
-
-		// Tag postings.
-		tagFreq := make(map[string]int)
-		for _, tag := range bf.Tags {
-			for _, t := range tokenizeAndStem(tag) {
-				tagFreq[t]++
-			}
-		}
-		for term, count := range tagFreq {
-			existing.InvertedIndex[term] = append(existing.InvertedIndex[term], Posting{
-				Path:      f,
-				Frequency: count,
-				Field:     "tag",
-			})
-		}
-
-		// Path postings.
-		pathSegments := strings.Split(strings.TrimSuffix(f, ".md"), string(filepath.Separator))
-		pathFreq := make(map[string]int)
-		for _, seg := range pathSegments {
-			for _, t := range tokenizeAndStem(seg) {
-				pathFreq[t]++
-			}
-		}
-		for term, count := range pathFreq {
-			existing.InvertedIndex[term] = append(existing.InvertedIndex[term], Posting{
-				Path:      f,
-				Frequency: count,
-				Field:     "path",
-			})
-		}
+		chunks := indexFileIntoBM25(existing, f, bf)
 
 		// Update manifest chunk count.
 		if fs, ok := newManifest.Files[f]; ok {
@@ -708,20 +558,7 @@ func (b *FileBrain) updateFullIndexIncremental(dirty, deleted []string, newManif
 		}
 	}
 
-	// Recompute averages from updated maps.
-	var totalDocWords, totalChunkWords int
-	for _, doc := range existing.Documents {
-		totalDocWords += doc.WordCount
-	}
-	for _, chunk := range existing.Chunks {
-		totalChunkWords += chunk.WordCount
-	}
-	if existing.TotalDocs > 0 {
-		existing.AvgDocLength = float64(totalDocWords) / float64(existing.TotalDocs)
-	}
-	if existing.TotalChunks > 0 {
-		existing.AvgChunkLength = float64(totalChunkWords) / float64(existing.TotalChunks)
-	}
+	recomputeAverages(existing)
 
 	slog.Debug("incremental BM25 update complete",
 		"docs", existing.TotalDocs, "chunks", existing.TotalChunks)
@@ -732,6 +569,100 @@ func (b *FileBrain) updateFullIndexIncremental(dirty, deleted []string, newManif
 	b.indexCache = existing
 	b.indexCacheAt = time.Now()
 	return nil
+}
+
+// indexFileIntoBM25 tokenizes, chunks, and indexes a single brain file into idx,
+// adding its document entry, chunk entries, and content/tag/path postings.
+// Used by both full and incremental rebuilds. Returns the chunks produced.
+func indexFileIntoBM25(idx *FullIndex, path string, bf *BrainFile) []Chunk {
+	content := strings.TrimSpace(bf.Content)
+	contentTokens := tokenizeAndStem(content)
+	docWordCount := len(contentTokens)
+
+	chunks := chunkContent(content, ChunkTargetWords)
+	if len(chunks) == 0 {
+		chunks = []Chunk{{Text: content, Offset: 0, Length: len(content), WordCount: docWordCount}}
+	}
+
+	idx.Documents[path] = DocEntry{
+		Path:        path,
+		WordCount:   docWordCount,
+		Tags:        bf.Tags,
+		Updated:     bf.Updated.Time.Format(DateFormat),
+		AccessCount: bf.AccessCount,
+		ChunkCount:  len(chunks),
+		Confidence:  bf.Confidence,
+	}
+	idx.TotalDocs++
+
+	for ci, ch := range chunks {
+		chunkKey := fmt.Sprintf("%s#%d", path, ci)
+		chunkTokens := tokenizeAndStem(ch.Text)
+
+		idx.Chunks[chunkKey] = ChunkEntry{
+			DocPath:   path,
+			ChunkID:   ci,
+			WordCount: len(chunkTokens),
+			Offset:    ch.Offset,
+			Length:    ch.Length,
+		}
+		idx.TotalChunks++
+
+		freq := make(map[string]int)
+		for _, t := range chunkTokens {
+			freq[t]++
+		}
+		for term, count := range freq {
+			idx.InvertedIndex[term] = append(idx.InvertedIndex[term], Posting{
+				Path:      path,
+				Frequency: count,
+				Field:     "content",
+				ChunkKey:  chunkKey,
+			})
+		}
+	}
+
+	indexFieldTerms(idx, path, bf.Tags, "tag")
+	pathSegments := strings.Split(strings.TrimSuffix(path, ".md"), string(filepath.Separator))
+	indexFieldTerms(idx, path, pathSegments, "path")
+
+	return chunks
+}
+
+// indexFieldTerms tokenizes each item, aggregates term frequency, and adds one
+// document-level posting per term (no ChunkKey) for the given field.
+func indexFieldTerms(idx *FullIndex, path string, items []string, field string) {
+	freq := make(map[string]int)
+	for _, item := range items {
+		for _, t := range tokenizeAndStem(item) {
+			freq[t]++
+		}
+	}
+	for term, count := range freq {
+		idx.InvertedIndex[term] = append(idx.InvertedIndex[term], Posting{
+			Path:      path,
+			Frequency: count,
+			Field:     field,
+		})
+	}
+}
+
+// recomputeAverages recalculates AvgDocLength and AvgChunkLength from the
+// current Documents and Chunks maps.
+func recomputeAverages(idx *FullIndex) {
+	var totalDocWords, totalChunkWords int
+	for _, doc := range idx.Documents {
+		totalDocWords += doc.WordCount
+	}
+	for _, chunk := range idx.Chunks {
+		totalChunkWords += chunk.WordCount
+	}
+	if idx.TotalDocs > 0 {
+		idx.AvgDocLength = float64(totalDocWords) / float64(idx.TotalDocs)
+	}
+	if idx.TotalChunks > 0 {
+		idx.AvgChunkLength = float64(totalChunkWords) / float64(idx.TotalChunks)
+	}
 }
 
 // LoadFullIndex reads the index_full.json file (public, read-locked).
@@ -914,23 +845,7 @@ func (b *FileBrain) queryWithPRF(query string) []ChunkResult {
 		return firstPass
 	}
 
-	// Collect text from top-K chunks.
-	topK := PRFTopK
-	if topK > len(firstPass) {
-		topK = len(firstPass)
-	}
-	var feedbackText strings.Builder
-	for _, cr := range firstPass[:topK] {
-		ce, ok := idx.Chunks[fmt.Sprintf("%s#%d", cr.DocPath, cr.ChunkID)]
-		if !ok {
-			continue
-		}
-		// Load the chunk text from the inverted index isn't possible, so we
-		// collect the terms that appear in this chunk from the inverted index.
-		// Instead, we extract the top-IDF terms that co-occur in these chunks.
-		_ = ce
-	}
-	_ = feedbackText
+	topK := min(PRFTopK, len(firstPass))
 
 	// Build a set of original terms for dedup.
 	origSet := make(map[string]bool, len(originalTerms))
@@ -982,10 +897,7 @@ func (b *FileBrain) queryWithPRF(query string) []ChunkResult {
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].idf > candidates[j].idf
 	})
-	expandCount := PRFExpandTerms
-	if expandCount > len(candidates) {
-		expandCount = len(candidates)
-	}
+	expandCount := min(PRFExpandTerms, len(candidates))
 
 	expandedTerms := make([]string, len(originalTerms), len(originalTerms)+expandCount)
 	copy(expandedTerms, originalTerms)

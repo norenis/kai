@@ -48,9 +48,12 @@ func loadConfig() (*config.Config, error) {
 // applyEmbedConfig configures the brain's embedding backend from config.
 func applyEmbedConfig(b *brain.FileBrain, cfg *config.Config) {
 	b.SetEmbedOptions(brain.EmbedOptions{
-		Provider:    brain.EmbedProvider(cfg.Brain.Embeddings.Provider),
-		OllamaURL:   cfg.Brain.Embeddings.Ollama.URL,
-		OllamaModel: cfg.Brain.Embeddings.Ollama.Model,
+		Provider:      brain.EmbedProvider(cfg.Brain.Embeddings.Provider),
+		OllamaURL:     cfg.Brain.Embeddings.Ollama.URL,
+		OllamaModel:   cfg.Brain.Embeddings.Ollama.Model,
+		GeminiAPIKey:  cfg.Brain.Embeddings.Gemini.APIKey,
+		GeminiModel:   cfg.Brain.Embeddings.Gemini.Model,
+		GeminiBaseURL: cfg.Brain.Embeddings.Gemini.BaseURL,
 	})
 }
 

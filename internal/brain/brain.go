@@ -20,6 +20,7 @@ type EmbedProvider string
 const (
 	EmbedAuto   EmbedProvider = ""       // Try ollama, fall back to LSI.
 	EmbedOllama EmbedProvider = "ollama" // Use Ollama embedding model.
+	EmbedGemini EmbedProvider = "gemini" // Use Google Gemini embedding API.
 	EmbedLSI    EmbedProvider = "lsi"    // Use LSI (corpus-derived, no external deps).
 )
 
@@ -28,6 +29,9 @@ type EmbedOptions struct {
 	Provider  EmbedProvider
 	OllamaURL   string
 	OllamaModel string
+	GeminiAPIKey  string
+	GeminiModel   string
+	GeminiBaseURL string
 }
 
 const indexCacheTTL = 5 * time.Second

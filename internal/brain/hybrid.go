@@ -38,7 +38,12 @@ func (b *FileBrain) queryHybrid(query string) []ChunkResult {
 		return bm25Results // Fall back to BM25-only.
 	}
 
-	vecResults := vi.QueryVec(query)
+	var vecResults []VecResult
+	if e := b.queryEmbedder(vi.Provider); e != nil {
+		vecResults = vi.QueryVecWithEmbedder(query, e)
+	} else {
+		vecResults = vi.QueryVec(query)
+	}
 	if len(vecResults) == 0 {
 		return bm25Results
 	}

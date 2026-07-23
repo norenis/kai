@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -124,7 +125,7 @@ type embedResult struct {
 // chunkTexts is a pre-loaded map of chunkKey → text (avoids file I/O without lock).
 // Supports incremental mode: reuses vectors for unchanged chunks from existing index.
 // Respects ctx cancellation/timeout — saves partial results if time runs out.
-func buildVecIndexOllama(ctx context.Context, _ *FullIndex, embedder *OllamaEmbedder, existing *VecIndex, chunkTexts map[string]string) *VecIndex {
+func buildVecIndexNeural(ctx context.Context, provider string, embedder Embedder, existing *VecIndex, chunkTexts map[string]string) *VecIndex {
 	var toEmbed []embedJob
 	reused := make(map[string][]float32)
 	hashes := make(map[string]string)
@@ -132,7 +133,7 @@ func buildVecIndexOllama(ctx context.Context, _ *FullIndex, embedder *OllamaEmbe
 
 	existingHashes := make(map[string]string)
 	existingVecs := make(map[string][]float32)
-	if existing != nil && existing.Provider == "ollama" && existing.Hashes != nil {
+	if existing != nil && existing.Provider == provider && existing.Hashes != nil {
 		existingHashes = existing.Hashes
 		existingVecs = existing.ChunkVecs
 		dims = existing.Dims
@@ -160,9 +161,7 @@ func buildVecIndexOllama(ctx context.Context, _ *FullIndex, embedder *OllamaEmbe
 	}
 
 	chunkVecs := make(map[string][]float32, len(reused)+len(newVecs))
-	for k, v := range reused {
-		chunkVecs[k] = v
-	}
+	maps.Copy(chunkVecs, reused)
 	for _, r := range newVecs {
 		chunkVecs[r.chunkKey] = r.vec
 		if dims == 0 {
@@ -176,7 +175,7 @@ func buildVecIndexOllama(ctx context.Context, _ *FullIndex, embedder *OllamaEmbe
 
 	return &VecIndex{
 		Dims:      dims,
-		Provider:  "ollama",
+		Provider:  provider,
 		ChunkVecs: chunkVecs,
 		Hashes:    hashes,
 	}
@@ -191,33 +190,25 @@ type batchJob struct {
 // Batching reduces HTTP round-trips from O(chunks) to O(chunks/EmbedBatchSize).
 // Workers respect ctx — if cancelled/timed out, partial results are returned and
 // the incremental rebuild will fill the rest on the next run.
-func embedConcurrent(ctx context.Context, embedder *OllamaEmbedder, jobs []embedJob, hashes map[string]string) []embedResult {
+func embedConcurrent(ctx context.Context, embedder Embedder, jobs []embedJob, hashes map[string]string) []embedResult {
 	total := len(jobs)
 
 	// Split jobs into batches.
 	var batches []batchJob
 	for i := 0; i < len(jobs); i += EmbedBatchSize {
-		end := i + EmbedBatchSize
-		if end > len(jobs) {
-			end = len(jobs)
-		}
+		end := min(i+EmbedBatchSize, len(jobs))
 		batches = append(batches, batchJob{jobs: jobs[i:end]})
 	}
 
-	workers := EmbedWorkers
-	if workers > len(batches) {
-		workers = len(batches)
-	}
+	workers := min(EmbedWorkers, len(batches))
 
 	batchCh := make(chan batchJob, len(batches))
 	resultCh := make(chan embedResult, total)
 
 	var done atomic.Int64
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for batch := range batchCh {
 				select {
 				case <-ctx.Done():
@@ -247,7 +238,7 @@ func embedConcurrent(ctx context.Context, embedder *OllamaEmbedder, jobs []embed
 					}
 				}
 			}
-		}()
+		})
 	}
 
 dispatch:
@@ -328,12 +319,8 @@ func mergeVecIndex(base *VecIndex, delta *VecIndex, removePaths map[string]bool)
 	}
 
 	// Overlay delta vectors (overwrite any base entries with same key).
-	for ck, vec := range delta.ChunkVecs {
-		merged.ChunkVecs[ck] = vec
-	}
-	for ck, h := range delta.Hashes {
-		merged.Hashes[ck] = h
-	}
+	maps.Copy(merged.ChunkVecs, delta.ChunkVecs)
+	maps.Copy(merged.Hashes, delta.Hashes)
 	if len(delta.TermVecs) > 0 {
 		merged.TermVecs = delta.TermVecs
 		merged.IDF = delta.IDF
@@ -347,10 +334,7 @@ func safeSubstring(s string, offset, length int) string {
 	if offset >= len(s) {
 		return s
 	}
-	end := offset + length
-	if end > len(s) {
-		end = len(s)
-	}
+	end := min(offset+length, len(s))
 	return strings.TrimSpace(s[offset:end])
 }
 
@@ -385,7 +369,7 @@ func (vi *VecIndex) QueryVec(query string) []VecResult {
 }
 
 // QueryVecWithEmbedder queries using a specific Ollama embedder instance.
-func (vi *VecIndex) QueryVecWithEmbedder(query string, embedder *OllamaEmbedder) []VecResult {
+func (vi *VecIndex) QueryVecWithEmbedder(query string, embedder Embedder) []VecResult {
 	if vi == nil || len(vi.ChunkVecs) == 0 || embedder == nil {
 		return nil
 	}
