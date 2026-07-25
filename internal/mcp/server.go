@@ -31,6 +31,31 @@ const (
 	SourceDirect = "direct"
 )
 
+// vaultCategory is a reserved brain category that is invisible to brain_list,
+// brain_search, and ask — content there is only reachable via brain_read /
+// brain_write when the caller supplies the correct pin, checked fresh on
+// every call. This mirrors an out-of-band vault (auth required every read),
+// unlike ordinary brain content which is fully readable to anyone holding
+// the MCP bearer token.
+const vaultCategory = "vault"
+
+// isVaultPath reports whether path falls under the reserved vault category.
+func isVaultPath(path string) bool {
+	root := strings.SplitN(path, "/", 2)[0]
+	return root == vaultCategory
+}
+
+// vaultPinOK does a constant-time comparison against the configured vault
+// pin. An empty configured pin fails closed — the vault category is simply
+// unusable until a pin is set.
+func (s *Server) vaultPinOK(pin string) bool {
+	expected := s.cfg.Brain.VaultPin
+	if expected == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(pin), []byte(expected)) == 1
+}
+
 // DefaultConfidence is used when no confidence level is specified.
 const DefaultConfidence = "medium"
 
@@ -187,6 +212,9 @@ func (s *Server) registerTools() {
 				mcplib.Required(),
 				mcplib.Description("Relative path within brain directory (e.g. 'opinions/testing.md')"),
 			),
+			mcplib.WithString("pin",
+				mcplib.Description("Required when path starts with 'vault/' — the configured vault pin"),
+			),
 		),
 		s.handleBrainRead,
 	)
@@ -196,7 +224,7 @@ func (s *Server) registerTools() {
 			mcplib.WithDescription("Write or update a brain file directly. No LLM needed. Creates the file if it doesn't exist."),
 			mcplib.WithString("path",
 				mcplib.Required(),
-				mcplib.Description("Relative path within brain directory. Must start with an allowed category: "+strings.Join(brain.DefaultCategories, ", ")+". Example: 'opinions/testing.md'"),
+				mcplib.Description("Relative path within brain directory. Must start with an allowed category: "+strings.Join(brain.DefaultCategories, ", ")+" — or 'vault' (requires 'pin'). Example: 'opinions/testing.md'"),
 			),
 			mcplib.WithString("content",
 				mcplib.Required(),
@@ -208,6 +236,9 @@ func (s *Server) registerTools() {
 			),
 			mcplib.WithString("confidence",
 				mcplib.Description("Confidence level: high, medium, or low (default: medium)"),
+			),
+			mcplib.WithString("pin",
+				mcplib.Description("Required when path starts with 'vault/' — the configured vault pin"),
 			),
 		),
 		s.handleBrainWrite,
@@ -340,6 +371,9 @@ func (s *Server) handleBrainList(ctx context.Context, req mcplib.CallToolRequest
 
 	var entries []brainEntry
 	for _, f := range files {
+		if isVaultPath(f) {
+			continue
+		}
 		bf, err := s.brain.Load(f)
 		if err != nil {
 			slog.Debug("brain_list: failed to load file", "path", f, "err", err)
@@ -404,6 +438,9 @@ func (s *Server) handleBrainSearch(ctx context.Context, req mcplib.CallToolReque
 
 	var entries []searchResult
 	for _, c := range candidates {
+		if isVaultPath(c.path) {
+			continue
+		}
 		bf, err := s.brain.Load(c.path)
 		if err != nil {
 			continue
@@ -482,6 +519,9 @@ func (s *Server) handleAsk(ctx context.Context, req mcplib.CallToolRequest) (*mc
 		if count >= askMaxChunks {
 			break
 		}
+		if isVaultPath(cr.DocPath) {
+			continue
+		}
 		if seen[cr.DocPath] {
 			continue
 		}
@@ -522,6 +562,12 @@ func (s *Server) handleBrainRead(ctx context.Context, req mcplib.CallToolRequest
 	if err != nil {
 		return mcplib.NewToolResultError("missing required parameter: path"), nil
 	}
+	if isVaultPath(path) {
+		pin, _ := req.RequireString("pin")
+		if !s.vaultPinOK(pin) {
+			return mcplib.NewToolResultError("vault: invalid or missing pin"), nil
+		}
+	}
 	slog.Debug("brain_read", "path", path)
 
 	bf, err := s.brain.Load(path)
@@ -557,9 +603,15 @@ func (s *Server) handleBrainWrite(ctx context.Context, req mcplib.CallToolReques
 	if !strings.HasSuffix(path, ".md") {
 		path = path + ".md"
 	}
-	// Validate that the path starts with an allowed root category.
+	// Validate that the path starts with an allowed root category, or the
+	// reserved vault category (gated separately by pin below).
 	rootDir := strings.SplitN(path, "/", 2)[0]
-	if !brain.ValidCategory(rootDir) {
+	if rootDir == vaultCategory {
+		pin, _ := req.RequireString("pin")
+		if !s.vaultPinOK(pin) {
+			return mcplib.NewToolResultError("vault: invalid or missing pin"), nil
+		}
+	} else if !brain.ValidCategory(rootDir) {
 		return mcplib.NewToolResultError(fmt.Sprintf(
 			"invalid category %q — must be one of: %s",
 			rootDir, strings.Join(brain.DefaultCategories, ", "),

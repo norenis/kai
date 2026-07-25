@@ -101,6 +101,10 @@ type BrainConfig struct {
 	MaxContextFiles int         `yaml:"max_context_files"`
 	Sync            SyncConfig  `yaml:"sync"`
 	Embeddings      EmbedConfig `yaml:"embeddings"`
+	// VaultPin gates read/write of the reserved "vault/" category (supports
+	// ${ENV}). Empty disables the category entirely — vault paths are then
+	// rejected the same as any other unrecognized category.
+	VaultPin string `yaml:"vault_pin"`
 }
 
 // EmbedConfig holds embedding settings for vector search.
