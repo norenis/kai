@@ -110,3 +110,52 @@ func TestBrainPublishesMovesAsCreateAndDelete(t *testing.T) {
 		t.Errorf("events = %+v", got)
 	}
 }
+
+func TestWatchDiskOneEventPerWrite(t *testing.T) {
+	dir := t.TempDir()
+	b := New(dir)
+	if err := b.Save(&BrainFile{Path: "knowledge/a.md", Confidence: "high", Content: "\nfirst\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RebuildIndex(); err != nil {
+		t.Fatal(err)
+	}
+	bus := events.NewBus()
+	b.SetEvents(bus, events.SourceMCP)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.WatchDisk(ctx); err != nil {
+		t.Fatal(err)
+	}
+	drain := collect(t, bus)
+
+	// In-process save: the brain reports it; the watcher must not repeat it.
+	if err := b.Save(&BrainFile{Path: "knowledge/a.md", Confidence: "high", Content: "\nsecond\n"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	got := drain()
+	if len(got) != 1 || got[0].Source != events.SourceMCP {
+		t.Fatalf("in-process save: %+v", got)
+	}
+
+	// Another process (here: a second FileBrain without a bus, like `kai task add`).
+	other := New(dir)
+	if err := other.Save(&BrainFile{Path: "tasks/2026-10-24.md", Confidence: "medium", Content: "\n- [ ] item\n"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	got = drain()
+	if len(got) != 1 || got[0].Source != events.SourceFS || got[0].Type != events.Create || got[0].Path != "tasks/2026-10-24.md" || len(got[0].Chunks) != 1 {
+		t.Fatalf("external save: %+v", got)
+	}
+
+	// Reindex writes only derived files: nothing is reported.
+	if err := other.RebuildIndex(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(600 * time.Millisecond)
+	if got := drain(); len(got) != 0 {
+		t.Fatalf("reindex produced events: %+v", got)
+	}
+}

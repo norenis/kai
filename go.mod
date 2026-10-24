@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/adrg/frontmatter v0.2.0
 	github.com/coreos/go-oidc/v3 v3.20.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/spf13/cobra v1.8.1
 	github.com/xuri/excelize/v2 v2.10.1
@@ -34,6 +35,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

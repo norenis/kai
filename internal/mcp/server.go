@@ -161,6 +161,9 @@ func (s *Server) ServeHTTP(addr, token string) error {
 	// One event bus serves MCP writes and the dashboard's live stream.
 	bus := events.NewBus()
 	s.brain.SetEvents(bus, events.SourceMCP)
+	if err := s.brain.WatchDisk(context.Background()); err != nil {
+		slog.Warn("brain file watcher disabled", "err", err)
+	}
 
 	// Mount dashboard at /dashboard.
 	dash := dashboard.New(s.brain, s.cfg.Brain.Path, s.cfg)

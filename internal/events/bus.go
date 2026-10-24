@@ -73,7 +73,7 @@ type Bus struct {
 	size      int // events in ring
 	head      int // index of the oldest event
 	subs      map[*subscriber]struct{}
-	lastByKey map[string]time.Time // path → last publish time (for fs dedupe)
+	lastByKey map[string]time.Time // path → last in-process publish (for fs dedupe)
 	now       func() time.Time
 }
 
@@ -103,7 +103,9 @@ func (b *Bus) Publish(e Event) Event {
 		b.ring[b.head] = e
 		b.head = (b.head + 1) % RecentSize
 	}
-	if e.Path != "" {
+	// Only in-process writes count for fs dedupe; the watcher's own reports
+	// must not hide the next change to the same file.
+	if e.Path != "" && e.Source != SourceFS {
 		b.lastByKey[e.Path] = b.now()
 		if len(b.lastByKey) > 4*RecentSize {
 			b.pruneKeys()

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -44,6 +45,9 @@ func newDashboardCmd() *cobra.Command {
 			b := brain.New(brainPath)
 			bus := events.NewBus()
 			b.SetEvents(bus, events.SourceDashboard)
+			if err := b.WatchDisk(context.Background()); err != nil {
+				slog.Warn("brain file watcher disabled", "err", err)
+			}
 			srv := dashboard.New(b, brainPath, cfg)
 			srv.SetEvents(bus)
 

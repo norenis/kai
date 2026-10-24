@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -76,4 +77,42 @@ func (b *FileBrain) exists(relPath string) bool {
 	}
 	_, err = os.Stat(p)
 	return err == nil
+}
+
+// WatchDisk reports notes changed by other processes (CLI, git sync, an
+// editor) on the brain's event bus until ctx ends. No-op without a bus.
+func (b *FileBrain) WatchDisk(ctx context.Context) error {
+	bus := b.Events()
+	if bus == nil {
+		return nil
+	}
+	_, err := events.Watch(ctx, b.root, bus, events.WatchOptions{
+		Chunks: b.chunkIDsFor,
+		Skip:   IsVaultPath,
+	})
+	return err
+}
+
+// chunkIDsFor returns a note's chunk ids from disk, or from the index when
+// the note was deleted.
+func (b *FileBrain) chunkIDsFor(path string, deleted bool) []string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if deleted {
+		idx, err := b.loadFullIndexCached()
+		if err != nil || idx == nil {
+			return nil
+		}
+		n := idx.Documents[path].ChunkCount
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("%s#%d", path, i)
+		}
+		return ids
+	}
+	bf, err := b.load(path)
+	if err != nil {
+		return nil
+	}
+	return chunkIDs(path, bf.Content)
 }
