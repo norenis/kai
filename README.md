@@ -207,7 +207,39 @@ sessions_path: ~/.kai/sessions
 server:
   listen_addr: 0.0.0.0:8080
   dashboard_pin: ""           # set a PIN to protect the dashboard
+  sso:
+    issuer: ""                # OIDC issuer URL, e.g. https://dex.example.com
+    client_id: ""
+    client_secret: "${OIDC_CLIENT_SECRET}"
+    redirect_url: ""          # e.g. http://localhost:8080/api/auth/oidc/callback
+    # scopes: [openid, profile, email]   # optional, this is the default
 ```
+
+---
+
+### 🔐 Dashboard authentication (PIN & SSO)
+
+By default the dashboard (`kai dashboard`) is wide open to anyone who can reach the port. Two independent ways to lock it down — both can be enabled at once, and the lock screen shows whichever are configured:
+
+- **PIN** — `server.dashboard_pin`. Simple shared secret, good for solo/local use.
+- **SSO (OIDC)** — `server.sso`. Sign in through any OIDC-compliant identity provider: [Dex](https://dexidp.io/), Okta, Azure AD, Google, etc. Since Dex speaks OIDC to client apps regardless of what it federates to upstream (SAML, LDAP, GitHub, ...), pointing `issuer` at a Dex instance covers those too — kai doesn't need its own SAML support.
+
+Setup:
+
+1. Register kai as an OIDC client with your provider (a "static client" in Dex config) and give it a `redirect_url` of `http://<host>:<port>/api/auth/oidc/callback`.
+2. Because the redirect URI must match exactly, run the dashboard on a fixed port rather than the default random one: `kai dashboard --port 8080`.
+3. Fill in `server.sso` in `config.yaml`:
+   ```yaml
+   server:
+     sso:
+       issuer: https://dex.example.com
+       client_id: kai-dashboard
+       client_secret: "${OIDC_CLIENT_SECRET}"   # set via env var, don't commit the raw secret
+       redirect_url: http://localhost:8080/api/auth/oidc/callback
+   ```
+4. Export `OIDC_CLIENT_SECRET` and start the dashboard. The lock screen will show a "Sign in with SSO" button in addition to (or instead of) the PIN field.
+
+If the provider is unreachable at startup, kai logs a warning and falls back to whatever else is configured (PIN, or no auth) rather than failing to launch.
 
 ---
 
@@ -221,6 +253,7 @@ server:
 - MCP integration with Claude Code slash commands
 - Module system (GitHub PRs, Google Sheets, extensible)
 - Dashboard UI with collapsible sidebar, plugin management, and sync controls
+- Dashboard auth via PIN and/or OIDC SSO (Dex, Okta, Azure AD, ...)
 
 ---
 

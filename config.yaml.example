@@ -31,6 +31,15 @@ sessions_path: ~/.kai/sessions
 server:
   listen_addr: 0.0.0.0:8080
   dashboard_pin: ""  # PIN lock for dashboard (empty = no auth)
+  sso:
+    # OIDC single sign-on for the dashboard. Works with any OIDC-compliant
+    # provider — Dex, Okta, Azure AD, Google, etc. Can be combined with
+    # dashboard_pin above (both login options are shown on the lock screen).
+    issuer: ""              # e.g. https://dex.example.com
+    client_id: ""
+    client_secret: "${OIDC_CLIENT_SECRET}"  # prefer an env var over a literal secret
+    redirect_url: ""        # must be registered with the provider, e.g. http://localhost:8080/api/auth/oidc/callback
+    # scopes: [openid, profile, email]  # optional; this is the default
 
 # Modules pull external data into the brain on demand via 'kai module run'.
 # Run 'kai module list' to see all available modules.
