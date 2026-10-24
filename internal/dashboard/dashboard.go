@@ -24,6 +24,7 @@ import (
 	"github.com/norenis/kai/internal/config"
 	"github.com/norenis/kai/internal/events"
 	"github.com/norenis/kai/internal/module"
+	"github.com/norenis/kai/internal/provider"
 	"github.com/norenis/kai/internal/router"
 	bsync "github.com/norenis/kai/internal/sync"
 	"github.com/xuri/excelize/v2"
@@ -1312,8 +1313,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Message string `json:"message"`
-		Mode    string `json:"mode"`
+		Message string             `json:"message"`
+		Mode    string             `json:"mode"`
+		History []provider.Message `json:"history"` // earlier turns of an ask conversation (sheet)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
 		http.Error(w, `{"error":"message is required"}`, http.StatusBadRequest)
@@ -1326,6 +1328,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	if s.router == nil {
 		http.Error(w, `{"error":"no LLM provider configured"}`, http.StatusServiceUnavailable)
 		return
+	}
+	for _, m := range req.History {
+		if m.Role != "user" && m.Role != "assistant" {
+			http.Error(w, `{"error":"history roles must be user or assistant"}`, http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Set SSE headers.
@@ -1357,21 +1365,43 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	} else {
-		ch, paths, err := s.router.StreamAsk(r.Context(), req.Message)
+		ch, sources, trace, err := s.router.StreamAskTraced(r.Context(), req.Message, req.History)
 		if err != nil {
 			fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
 			flusher.Flush()
 			return
 		}
-		brainPaths = paths
+		// Sources and the retrieval trace go first so the sheet can light
+		// the hits while the answer streams.
+		head, _ := json.Marshal(map[string]interface{}{"sources": sources, "trace": trace})
+		fmt.Fprintf(w, "data: %s\n\n", head)
+		flusher.Flush()
+
+		start := time.Now()
+		parts := 0
 		for chunk := range ch {
 			if chunk.Done {
 				break
 			}
+			parts++
 			data, _ := json.Marshal(map[string]string{"content": chunk.Content})
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
+		synth := float64(time.Since(start).Microseconds()) / 1000
+		trace.Stages = append(trace.Stages, events.Stage{Name: "synthesize", MS: synth, Count: parts})
+		trace.TotalMS += synth
+
+		chunks := make([]string, 0, len(sources))
+		for _, src := range sources {
+			brainPaths = append(brainPaths, src.Path)
+			chunks = append(chunks, src.Chunk)
+		}
+		s.events.Publish(events.Event{Type: events.Ask, Query: req.Message, Chunks: chunks, Trace: trace, Source: events.SourceDashboard})
+		done, _ := json.Marshal(map[string]interface{}{"done": true, "brain_files_used": brainPaths, "trace": trace})
+		fmt.Fprintf(w, "data: %s\n\n", done)
+		flusher.Flush()
+		return
 	}
 
 	// Send final event with metadata.

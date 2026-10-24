@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/norenis/kai/internal/brain"
+	"github.com/norenis/kai/internal/events"
 	"github.com/norenis/kai/internal/prompt"
 	"github.com/norenis/kai/internal/provider"
 	"github.com/norenis/kai/internal/retriever"
@@ -154,6 +155,63 @@ func (r *Router) StreamAsk(ctx context.Context, question string) (<-chan provide
 		return nil, nil, fmt.Errorf("llm stream: %w", err)
 	}
 	return ch, brainPaths, nil
+}
+
+// AskSource is one numbered piece of context given to the LLM for an ask.
+type AskSource struct {
+	Numeral string `json:"numeral"` // lowercase roman numeral the answer cites, e.g. "ii"
+	Path    string `json:"path"`    // note path
+	Chunk   string `json:"chunk"`   // chunk id "path#n"
+	Title   string `json:"title"`
+}
+
+var lowerRoman = []string{"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"}
+
+// askHistoryLimit caps the earlier turns sent with a follow-up question.
+const askHistoryLimit = 6
+
+// StreamAskTraced is StreamAsk for the dashboard sheet: context entries are
+// numbered with roman numerals the model is asked to cite ([i], [ii]),
+// earlier turns of the same conversation are sent along, and the retrieval
+// stages (embed, recall) are timed.
+func (r *Router) StreamAskTraced(ctx context.Context, question string, history []provider.Message) (<-chan provider.Chunk, []AskSource, *events.Trace, error) {
+	brainFiles, trace, err := r.retriever.RetrieveTraced(ctx, question, AskRetrievalLimit)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("retrieve: %w", err)
+	}
+	idx, _ := r.brain.LoadFullIndexCached()
+
+	var sb strings.Builder
+	sb.WriteString("Answer using the context below. Be concise. Cite the context you rely on with its numeral in square brackets, for example [i] or [ii][iii]. Cite nothing else.\n\n")
+	sources := make([]AskSource, 0, len(brainFiles))
+	for i, bf := range brainFiles {
+		if i >= len(lowerRoman) {
+			break
+		}
+		doc, chunk := bf.Path, bf.Path+"#0"
+		if j := strings.LastIndex(bf.Path, "#"); j >= 0 {
+			doc, chunk = bf.Path[:j], bf.Path
+		}
+		title := brain.FilenameTitle(doc)
+		if idx != nil {
+			if d, ok := idx.Documents[doc]; ok {
+				title = d.DisplayTitle()
+			}
+		}
+		src := AskSource{Numeral: lowerRoman[i], Path: doc, Chunk: chunk, Title: title}
+		sources = append(sources, src)
+		fmt.Fprintf(&sb, "### [%s] %s (%s)\n%s\n\n", src.Numeral, src.Title, doc, strings.TrimSpace(bf.Content))
+	}
+
+	if len(history) > askHistoryLimit {
+		history = history[len(history)-askHistoryLimit:]
+	}
+	messages := append(append([]provider.Message{}, history...), provider.Message{Role: "user", Content: question})
+	ch, err := r.provider.Stream(ctx, sb.String(), messages)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("llm stream: %w", err)
+	}
+	return ch, sources, trace, nil
 }
 
 // StreamFreeChat streams a direct LLM response without brain context.

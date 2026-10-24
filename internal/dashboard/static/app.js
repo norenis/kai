@@ -42,7 +42,7 @@ function go(screen) {
     if (on) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   });
-  scene.setView(search?.open ? 'search' : screen);
+  scene.setView(search?.open ? search.mode : screen);
 }
 
 // Bottom-right readout: right ascension follows the rotating equator.
@@ -235,7 +235,10 @@ search = mountSearch(document.getElementById('sheet'), {
   onOpen: openNote,
   onToggle(open) {
     stage.dataset.sheet = open ? 'search' : '';
-    scene.setView(open ? 'search' : screenFromHash());
+    scene.setView(open ? search?.mode || 'search' : screenFromHash());
+  },
+  onMode(mode) {
+    if (search?.open) scene.setView(mode);
   },
 });
 window.fluctlight.search = search;

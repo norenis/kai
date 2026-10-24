@@ -1,6 +1,10 @@
-// The global ⌘K sheet (spec 7.2): type to search the brain, ↵ to read a
-// note, ⌘↵ to ask (Task 10). The scene rises above the sheet, hits breathe
-// and recall fibres stream from them to the sheet's top edge.
+// The global ⌘K sheet (spec 7.2, 7.3): type to search the brain, ↵ to read
+// a note, ⌘↵ to ask. The scene rises above the sheet, hits breathe and
+// recall fibres stream from them to the sheet's top edge. An ask streams the
+// answer with numbered citations; follow-ups stay in the same conversation,
+// which survives closing the sheet until the page reloads.
+
+import { renderAnswer } from 'app/markdown.js';
 
 const DEBOUNCE_MS = 160;
 const TRACE_STEP_MS = 140;
@@ -21,8 +25,8 @@ const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT
 
 // mountSearch builds the sheet inside el.
 //   api(path, init), scene, labels, clusters() → array, llm() → bool,
-//   onOpen(path), onToggle(open)
-export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onToggle }) {
+//   onOpen(path), onToggle(open), onMode('search'|'ask')
+export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onToggle, onMode = () => {} }) {
   el.innerHTML = `
     <div class="in">
       <span class="ic" aria-hidden="true"></span>
@@ -31,8 +35,10 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     </div>
     <div class="trace" aria-label="Recall trace"></div>
     <div class="res" role="listbox" aria-label="Results"></div>
+    <div class="conv" aria-live="polite" hidden></div>
     <div class="fb">
-      <span class="sc"><kbd>↑↓</kbd>move</span><span class="sc"><kbd>↵</kbd>read</span><span class="sc"><kbd>esc</kbd>close</span>
+      <span class="sc for-search"><kbd>↑↓</kbd>move</span><span class="sc for-search"><kbd>↵</kbd>read</span><span class="sc for-search"><kbd>esc</kbd>close</span>
+      <span class="sc for-ask">follow up…</span><span class="sc for-ask"><kbd>esc</kbd>collapse · history kept</span>
       <span class="sc ask"><kbd>⌘↵</kbd><span class="ask-label"></span></span>
     </div>`;
   const input = el.querySelector('input');
@@ -40,6 +46,12 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   const traceEl = el.querySelector('.trace');
   const list = el.querySelector('.res');
   const askEl = el.querySelector('.ask');
+  const conv = el.querySelector('.conv');
+
+  // Ask conversation: [{q, answer, sources, trace, streaming, error}].
+  let mode = 'search';
+  const turns = [];
+  let asking = false;
 
   let open = false, results = [], sel = 0, timer = 0, ctrl = null, seq = 0, query = '';
   let traceTimers = [];
@@ -52,12 +64,14 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     askEl.querySelector('.ask-label').innerHTML = ok ? '<i>ask</i>' : 'ask · no llm configured';
   }
 
-  function renderTrace(trace) {
+  // renderTrace lights the first `lit` stages in sequence (all by default);
+  // pending stages show no timing yet.
+  function renderTrace(trace, lit = Infinity) {
     traceTimers.forEach(clearTimeout);
     traceTimers = [];
     const stages = trace?.stages || [];
-    traceEl.innerHTML = stages.map((s) => `<div class="tr"><b></b><span>${esc(s.name)}</span><em>${Math.round(s.ms)}ms</em></div>`).join('');
-    [...traceEl.children].forEach((c, i) => traceTimers.push(setTimeout(() => c.classList.add('on'), 60 + i * TRACE_STEP_MS)));
+    traceEl.innerHTML = stages.map((s, i) => `<div class="tr" data-stage="${esc(s.name)}"><b></b><span>${esc(s.name)}</span><em>${i < lit ? `${Math.round(s.ms)}ms` : ''}</em></div>`).join('');
+    [...traceEl.children].forEach((c, i) => { if (i < lit) traceTimers.push(setTimeout(() => c.classList.add('on'), 60 + i * TRACE_STEP_MS)); });
   }
 
   function renderResults() {
@@ -94,6 +108,97 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     return { x0: nx(r.left + r.width * 0.2), x1: nx(r.right - r.width * 0.2), y: 1 - ((r.top - host.top) / host.height) * 2 };
   }
 
+  function setMode(next) {
+    if (mode === next) return;
+    mode = next;
+    el.dataset.mode = next;
+    list.hidden = next !== 'search';
+    conv.hidden = next !== 'ask';
+    input.placeholder = next === 'ask' ? 'Follow up…' : 'Search memories…';
+    onMode(next);
+  }
+
+  function renderConv() {
+    conv.innerHTML = turns.map((t, k) => `
+      <div class="turn${k === turns.length - 1 ? ' last' : ''}">
+        <div class="tq">${esc(t.q)}</div>
+        <div class="ans">${t.error ? `<span class="err">${esc(t.error)}</span>` : renderAnswer(t.answer)}${t.streaming ? '<span class="caret"></span>' : ''}</div>
+        ${t.sources?.length ? `<div class="src">${t.sources.map((s) => `<span data-path="${esc(s.path)}" role="button" tabindex="0"><b>${esc(s.numeral)}</b>${esc(s.title)}</span>`).join('')}</div>` : ''}
+      </div>`).join('');
+    conv.scrollTop = conv.scrollHeight;
+    const t = turns[turns.length - 1];
+    if (t) {
+      const n = t.sources?.length || 0;
+      meta.innerHTML = t.streaming ? `answering · <i>${n} sources</i>` : `<i>${n} sources</i>`;
+    }
+  }
+
+  let convFrame = 0;
+  const renderConvSoon = () => { if (!convFrame) convFrame = requestAnimationFrame(() => { convFrame = 0; renderConv(); }); };
+
+  // ask streams an answer for q, sending earlier turns as history.
+  async function ask(q) {
+    if (!llm() || asking || !q.trim()) return;
+    asking = true;
+    ctrl?.abort();
+    clearTimeout(timer);
+    setMode('ask');
+    const history = turns.filter((t) => !t.error).flatMap((t) => [{ role: 'user', content: t.q }, { role: 'assistant', content: t.answer }]);
+    const turn = { q, answer: '', sources: [], trace: null, streaming: true, error: '' };
+    turns.push(turn);
+    input.value = '';
+    renderConv();
+    renderTrace({ stages: [{ name: 'embed', ms: 0 }, { name: 'recall', ms: 0 }, { name: 'synthesize', ms: 0 }] }, 0);
+    try {
+      const res = await fetch('api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: q, mode: 'brain', history }),
+      });
+      if (res.status === 401) { location.reload(); return; }
+      if (!res.ok || !res.body) throw new Error((await res.text()).replace(/[{}"]/g, '').replace(/^error:/, '') || `ask failed (${res.status})`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          for (const line of block.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            const evt = JSON.parse(line.slice(6));
+            if (evt.error) turn.error = evt.error;
+            if (evt.sources) {
+              turn.sources = evt.sources;
+              showAskInScene(turn);
+              renderTrace({ stages: [...evt.trace.stages, { name: 'synthesize', ms: 0 }] }, 2);
+            }
+            if (evt.content) turn.answer += evt.content;
+            if (evt.done && evt.trace) { turn.trace = evt.trace; renderTrace(evt.trace); }
+          }
+          renderConvSoon();
+        }
+      }
+    } catch (err) {
+      turn.error = String(err.message || err);
+    } finally {
+      turn.streaming = false;
+      asking = false;
+      renderConv();
+    }
+  }
+
+  function showAskInScene(turn) {
+    const ids = (turn.sources || []).map((s) => s.chunk);
+    scene.highlight(ids, { color: '#ffffff' });
+    labels.setHitClusters(ids.map((id) => scene.node(id)?.cluster).filter((c) => c != null && c >= 0));
+    scene.recall(ids.length ? ids : null, sheetTopNdc);
+  }
+
   async function run(q) {
     const my = ++seq;
     ctrl?.abort();
@@ -123,9 +228,17 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     el.hidden = false;
     renderAsk();
     onToggle(true);
+    onMode(mode);
     input.focus();
     input.select();
-    if (input.value.trim()) run(input.value);
+    if (mode === 'ask' && turns.length) {
+      renderConv();
+      const last = turns[turns.length - 1];
+      if (last.trace) renderTrace(last.trace);
+      showAskInScene(last);
+    } else if (input.value.trim()) {
+      run(input.value);
+    }
   }
 
   function hide() {
@@ -147,6 +260,7 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   }
 
   input.addEventListener('input', () => {
+    if (mode === 'ask' && input.value.trim()) setMode('search'); // typing searches again; the conversation stays
     clearTimeout(timer);
     timer = setTimeout(() => run(input.value), DEBOUNCE_MS);
   });
@@ -157,7 +271,11 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
       sel = (sel + (e.key === 'ArrowDown' ? 1 : results.length - 1)) % results.length;
       renderResults();
     } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault(); // ask: Task 10
+      e.preventDefault();
+      ask(input.value);
+    } else if (e.key === 'Enter' && mode === 'ask') {
+      e.preventDefault();
+      ask(input.value);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       choose(sel);
@@ -174,6 +292,10 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     const row = e.target.closest('.r');
     if (row) choose(Number(row.dataset.i));
   });
+  conv.addEventListener('click', (e) => {
+    const src = e.target.closest('.src span');
+    if (src) { hide(); onOpen(src.dataset.path); }
+  });
 
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -187,5 +309,6 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     }
   });
 
-  return { show, hide, get open() { return open; }, get results() { return results; } };
+  el.dataset.mode = mode;
+  return { show, hide, ask, get open() { return open; }, get results() { return results; }, get mode() { return mode; }, get turns() { return turns; } };
 }
