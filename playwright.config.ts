@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+// The web server runs `kai dashboard` against a throwaway copy of the
+// synthetic demo brain (tests/fixtures/demo-brain); build ./kai first.
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
@@ -12,9 +14,9 @@ export default defineConfig({
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],
   webServer: {
-    command: './kai dashboard --port 9234 --no-open',
-    url: 'http://localhost:9234',
+    command: './tests/e2e/serve-demo.sh',
+    url: 'http://localhost:9234/api/info',
     reuseExistingServer: !process.env.CI,
-    timeout: 10_000,
+    timeout: 60_000,
   },
 });

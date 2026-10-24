@@ -19,7 +19,7 @@ credentials.json
 config.yaml
 
 # Go
-vendor/
+/vendor/
 
 # OS files
 .DS_Store

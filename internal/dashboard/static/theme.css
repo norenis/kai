@@ -1,0 +1,75 @@
+/* Fluctlight Hub - Celestial Orrery theme. Visual source of truth: the approved mock. */
+:root {
+  --void: #03060b;
+  --void-hi: #11233b;
+  --gold: #d8bc84;
+  --gold-2: rgba(216, 188, 132, .55);
+  --gold-3: rgba(216, 188, 132, .2);
+  --champagne: #f3dfae;
+  --soul: #6fe3f5;
+  --soul-hi: #c8f6ff;
+  --ink: #eef1f2;
+  --ink-2: #a7b0b8;
+  --ink-3: #6b7680;
+  --coral: #ff6f5c;
+  --serif: "Cormorant Garamond", Georgia, serif;
+  --sans: "Montserrat", system-ui, sans-serif;
+  --body: "Inter", system-ui, sans-serif;
+  --rail: 64px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: radial-gradient(ellipse at 50% 45%, var(--void-hi), #0a1526 40%, var(--void));
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+[hidden] { display: none !important; }
+
+/* Small caps labels */
+.k { font: 400 9px var(--sans); letter-spacing: .36em; text-transform: uppercase; color: var(--ink-3); }
+.sc { font: 400 8.5px var(--sans); letter-spacing: .26em; text-transform: uppercase; color: var(--ink-3); }
+.sc i { font-style: normal; color: var(--gold); }
+.sc .co { color: var(--coral); }
+.hr { height: 1px; background: linear-gradient(90deg, var(--gold-2), transparent); }
+
+/* Stage: the scene fills the viewport; overlays sit on top */
+#stage { position: fixed; inset: 0; overflow: hidden; }
+#gl { position: absolute; inset: 0; transform-origin: 100% 0; transition: transform .9s cubic-bezier(.2, .7, .2, 1), opacity .6s; }
+#gl canvas { display: block; width: 100%; height: 100%; }
+#labels { position: absolute; inset: 0; pointer-events: none; transition: opacity .4s; }
+
+/* Rail */
+.rail {
+  position: absolute; left: 0; top: 0; bottom: 0; width: var(--rail); z-index: 6;
+  display: flex; flex-direction: column; align-items: center; gap: 26px; padding: 24px 0;
+  border-right: 1px solid rgba(216, 188, 132, .14);
+  background: linear-gradient(90deg, rgba(3, 6, 11, .6), transparent);
+}
+.mark { width: 28px; height: 28px; border: 1px solid var(--gold); border-radius: 50%; position: relative; margin-bottom: 6px; }
+.mark::before { content: ""; position: absolute; inset: -6px 13px; border-left: 1px solid var(--gold-2); }
+.mark::after { content: ""; position: absolute; inset: 5px; border: 1px solid var(--gold-2); border-radius: 50%; transform: rotateX(65deg); }
+.ri {
+  color: var(--ink-3); text-decoration: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  font: 400 7.5px var(--sans); letter-spacing: .3em;
+  transition: color .3s;
+}
+.ri:hover { color: var(--ink-2); }
+.ri:focus-visible { outline: 1px solid var(--gold-2); outline-offset: 6px; }
+.ri.on { color: var(--gold); }
+.ri.on svg { filter: drop-shadow(0 0 4px rgba(216, 188, 132, .7)); }
+.ri svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1; }
+
+/* Sky overlays (filled from Task 3 on) */
+.id { position: absolute; left: calc(var(--rail) + 36px); top: 40px; z-index: 5; }
+.inf { position: absolute; right: 40px; top: 40px; text-align: right; z-index: 5; }
+.foot { position: absolute; right: 40px; bottom: 34px; text-align: right; line-height: 2; z-index: 5; }
+.q { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 5; }
+#stage:not([data-s="sky"]) .inf,
+#stage:not([data-s="sky"]) .foot { display: none; }
+#stage[data-s="sys"] .id,
+#stage[data-s="sys"] .q { display: none; }

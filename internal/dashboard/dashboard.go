@@ -151,6 +151,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// All other routes require PIN/SSO if configured.
 	auth := s.withAuth
 	mux.HandleFunc("/", auth(s.handleIndex))
+	mux.HandleFunc("/classic", auth(s.handleClassic))
+	mux.HandleFunc("/classic/", auth(s.handleClassic))
+	mux.HandleFunc("/static/", handleStatic)
 	mux.HandleFunc("/api/overview", auth(s.handleOverview))
 	mux.HandleFunc("/api/tasks", auth(s.handleTasks))
 	mux.HandleFunc("/api/tasks/add", auth(s.handleTasksAdd))
@@ -271,7 +274,12 @@ func generateToken() string {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	serveEmbedded(w, "templates/index.html")
+	serveShell(w)
+}
+
+// handleClassic serves the previous dashboard UI until the new one reaches parity.
+func (s *Server) handleClassic(w http.ResponseWriter, r *http.Request) {
+	serveEmbedded(w, "templates/classic.html")
 }
 
 // serveEmbedded serves a raw embedded file as HTML.

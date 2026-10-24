@@ -1,0 +1,178 @@
+package dashboard
+
+import (
+	"io"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+
+	kai "github.com/norenis/kai"
+	"github.com/norenis/kai/internal/brain"
+	"github.com/norenis/kai/internal/config"
+)
+
+func newTestMux(t *testing.T, cfg *config.Config) *http.ServeMux {
+	t.Helper()
+	dir := t.TempDir()
+	if cfg == nil {
+		cfg = config.Defaults()
+	}
+	cfg.SessionsPath = t.TempDir()
+	srv := New(brain.New(dir), dir, cfg)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+	return mux
+}
+
+func get(t *testing.T, mux http.Handler, path string) (*http.Response, string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	res := rec.Result()
+	body, _ := io.ReadAll(res.Body)
+	return res, string(body)
+}
+
+func TestShellServedAtRoot(t *testing.T) {
+	mux := newTestMux(t, nil)
+	res, body := get(t, mux, "/")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+	if !strings.Contains(body, `class="rail"`) {
+		t.Error("shell has no rail")
+	}
+	if strings.Contains(body, assetsPlaceholder) {
+		t.Error("assets placeholder not replaced")
+	}
+	if !strings.Contains(body, "static/"+assetVersion()+"/app.js") {
+		t.Error("shell does not reference the versioned app module")
+	}
+}
+
+func TestClassicServesOldDashboard(t *testing.T) {
+	mux := newTestMux(t, nil)
+	for _, p := range []string{"/classic", "/classic/"} {
+		res, body := get(t, mux, p)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d", p, res.StatusCode)
+		}
+		if !strings.Contains(body, `aria-label="Main navigation"`) || !strings.Contains(body, "createApp") {
+			t.Errorf("%s: does not look like the classic dashboard", p)
+		}
+	}
+}
+
+func TestStaticAssets(t *testing.T) {
+	mux := newTestMux(t, nil)
+	v := assetVersion()
+	cases := []struct {
+		path, ctype string
+	}{
+		{"/static/" + v + "/app.js", "text/javascript; charset=utf-8"},
+		{"/static/" + v + "/theme.css", "text/css; charset=utf-8"},
+		{"/static/" + v + "/vendor/three/three.module.min.js", "text/javascript; charset=utf-8"},
+		{"/static/" + v + "/vendor/three/addons/postprocessing/UnrealBloomPass.js", "text/javascript; charset=utf-8"},
+		{"/static/" + v + "/vendor/marked/marked.esm.js", "text/javascript; charset=utf-8"},
+		{"/static/" + v + "/fonts/fonts.css", "text/css; charset=utf-8"},
+		{"/static/" + v + "/fonts/inter-latin-400-normal.woff2", "font/woff2"},
+	}
+	for _, c := range cases {
+		res, _ := get(t, mux, c.path)
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("%s: status = %d", c.path, res.StatusCode)
+			continue
+		}
+		if got := res.Header.Get("Content-Type"); got != c.ctype {
+			t.Errorf("%s: content type = %q, want %q", c.path, got, c.ctype)
+		}
+	}
+
+	for _, p := range []string{
+		"/static/" + v + "/",
+		"/static/" + v + "/vendor",
+		"/static/" + v + "/../templates/index.html",
+		"/static/" + v + "/missing.js",
+		"/static/app.js",
+	} {
+		if res, _ := get(t, mux, p); res.StatusCode == http.StatusOK {
+			t.Errorf("%s: expected an error status, got 200", p)
+		}
+	}
+}
+
+func TestStaticCacheHeaders(t *testing.T) {
+	mux := newTestMux(t, nil)
+
+	old := kai.Version
+	t.Cleanup(func() { kai.Version = old })
+
+	kai.Version = "dev"
+	res, _ := get(t, mux, "/static/dev/app.js")
+	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("dev build: Cache-Control = %q, want no-cache", got)
+	}
+
+	kai.Version = "v1.2.0"
+	res, _ = get(t, mux, "/static/v1.2.0/app.js")
+	if got := res.Header.Get("Cache-Control"); !strings.Contains(got, "immutable") {
+		t.Errorf("release build: Cache-Control = %q, want immutable", got)
+	}
+	res, _ = get(t, mux, "/static/v1.1.0/app.js")
+	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("stale version: Cache-Control = %q, want no-cache", got)
+	}
+}
+
+func TestStaticBehindAuthIsPublic(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Server.DashboardPIN = "1234"
+	mux := newTestMux(t, cfg)
+
+	if res, body := get(t, mux, "/"); res.StatusCode != http.StatusOK || strings.Contains(body, `class="rail"`) {
+		t.Error("shell must sit behind the PIN lock")
+	}
+	if res, _ := get(t, mux, "/classic"); res.StatusCode != http.StatusOK {
+		t.Errorf("/classic lock page: status = %d", res.StatusCode)
+	}
+	if res, _ := get(t, mux, "/static/"+assetVersion()+"/theme.css"); res.StatusCode != http.StatusOK {
+		t.Error("static assets carry no brain data and must load without a session")
+	}
+}
+
+// The new UI must not depend on any third-party host at runtime.
+func TestNewUIHasNoExternalURLs(t *testing.T) {
+	external := regexp.MustCompile(`(?i)(src|href)\s*=\s*["']https?://|url\(\s*["']?https?://|from\s+["']https?://|import\(\s*["']https?://|"https?://[^"]*\.(js|css|woff2?)"`)
+	check := func(name string, data []byte) {
+		if loc := external.FindIndex(data); loc != nil {
+			t.Errorf("%s references an external URL: %q", name, data[loc[0]:min(loc[1]+40, len(data))])
+		}
+	}
+
+	shell, err := templateFS.ReadFile("templates/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("templates/index.html", shell)
+
+	err = fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if strings.HasPrefix(p, "static/vendor/") {
+			return nil // third-party code; checked by loading in the browser
+		}
+		data, err := staticFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		check(p, data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
