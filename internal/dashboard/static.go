@@ -2,14 +2,14 @@ package dashboard
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"path"
-	"regexp"
 	"strings"
-
-	kai "github.com/norenis/kai"
+	"sync"
 )
 
 // staticFS holds the new UI's modules, styles, vendored libraries and fonts.
@@ -19,20 +19,30 @@ import (
 var staticFS embed.FS
 
 // assetsPlaceholder in templates/index.html is replaced with the versioned
-// static prefix, e.g. "static/v1.2.0", so every release gets fresh URLs and
-// assets can be cached forever.
+// static prefix, e.g. "static/3f9a0c1b2d4e", so every change to the assets
+// gets fresh URLs and assets can be cached forever.
 const assetsPlaceholder = "{{ASSETS}}"
 
-var unsafeVersionChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
-
-// assetVersion returns the build version made safe for use as a URL segment.
-func assetVersion() string {
-	v := unsafeVersionChars.ReplaceAllString(kai.Version, "-")
-	if v == "" {
-		return "dev"
-	}
-	return v
-}
+// assetVersion returns a short hash of the embedded static tree. Hashing the
+// content (instead of using the build version) keeps caching correct for
+// rebuilt development binaries too.
+var assetVersion = sync.OnceValue(func() string {
+	h := sha256.New()
+	_ = fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := staticFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+		h.Write(data)
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+})
 
 // staticContentTypes pins content types for embedded assets; the system mime
 // table differs between hosts (e.g. no woff2 in minimal containers).
@@ -49,7 +59,7 @@ var staticContentTypes = map[string]string{
 
 // handleStatic serves /static/<version>/<file> from the embedded static tree.
 // The version segment is only a cache key: any value resolves to the same
-// files, but only the current release version gets long-lived caching.
+// files, but only the current content hash gets long-lived caching.
 func handleStatic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -82,7 +92,7 @@ func handleStatic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if kai.Version != "dev" && version == assetVersion() {
+	if version == assetVersion() {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")

@@ -69,7 +69,10 @@ body {
 .inf { position: absolute; right: 40px; top: 40px; text-align: right; z-index: 5; }
 .foot { position: absolute; right: 40px; bottom: 34px; text-align: right; line-height: 2; z-index: 5; }
 .q { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 5; }
+.fps { position: absolute; left: calc(var(--rail) + 16px); bottom: 12px; z-index: 9; color: var(--gold); }
 #stage:not([data-s="sky"]) .inf,
 #stage:not([data-s="sky"]) .foot { display: none; }
 #stage[data-s="sys"] .id,
 #stage[data-s="sys"] .q { display: none; }
+
+#stage[data-render="fallback"] .foot { display: none; }

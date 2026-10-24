@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	kai "github.com/norenis/kai"
 	"github.com/norenis/kai/internal/brain"
 	"github.com/norenis/kai/internal/config"
 )
@@ -107,23 +106,23 @@ func TestStaticAssets(t *testing.T) {
 func TestStaticCacheHeaders(t *testing.T) {
 	mux := newTestMux(t, nil)
 
-	old := kai.Version
-	t.Cleanup(func() { kai.Version = old })
-
-	kai.Version = "dev"
-	res, _ := get(t, mux, "/static/dev/app.js")
-	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("dev build: Cache-Control = %q, want no-cache", got)
-	}
-
-	kai.Version = "v1.2.0"
-	res, _ = get(t, mux, "/static/v1.2.0/app.js")
+	res, _ := get(t, mux, "/static/"+assetVersion()+"/app.js")
 	if got := res.Header.Get("Cache-Control"); !strings.Contains(got, "immutable") {
-		t.Errorf("release build: Cache-Control = %q, want immutable", got)
+		t.Errorf("current assets: Cache-Control = %q, want immutable", got)
 	}
-	res, _ = get(t, mux, "/static/v1.1.0/app.js")
+	res, _ = get(t, mux, "/static/0123456789ab/app.js")
 	if got := res.Header.Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("stale version: Cache-Control = %q, want no-cache", got)
+		t.Errorf("stale asset version: Cache-Control = %q, want no-cache", got)
+	}
+}
+
+func TestAssetVersionIsContentHash(t *testing.T) {
+	v := assetVersion()
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(v) {
+		t.Errorf("assetVersion() = %q, want 12 hex chars", v)
+	}
+	if v != assetVersion() {
+		t.Error("assetVersion() is not stable")
 	}
 }
 
