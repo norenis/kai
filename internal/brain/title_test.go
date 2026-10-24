@@ -60,3 +60,38 @@ func TestIndexStoresTitles(t *testing.T) {
 		t.Errorf("DisplayTitle fallback = %q", got)
 	}
 }
+
+func TestBackfillTitles(t *testing.T) {
+	b := New(copyDemoBrain(t))
+	b.SetEmbedOptions(EmbedOptions{Provider: EmbedLSI})
+	if err := b.RebuildIndex(); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an index written before titles existed.
+	idx, _ := b.LoadFullIndex()
+	for p, d := range idx.Documents {
+		d.Title = ""
+		idx.Documents[p] = d
+	}
+	if err := b.saveFullIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+	vecBefore, _ := b.LoadVecIndex()
+
+	fresh := New(b.root)
+	n, err := fresh.BackfillTitles()
+	if err != nil || n != len(idx.Documents) {
+		t.Fatalf("BackfillTitles = %d, %v; want %d", n, err, len(idx.Documents))
+	}
+	again, _ := New(b.root).LoadFullIndex()
+	if got := again.Documents["knowledge/table-driven-tests-in-go.md"].Title; got != "Table driven tests in Go" {
+		t.Errorf("title after backfill = %q", got)
+	}
+	if n, _ := New(b.root).BackfillTitles(); n != 0 {
+		t.Errorf("second backfill filled %d entries", n)
+	}
+	vecAfter, _ := b.LoadVecIndex()
+	if len(vecAfter.ChunkVecs) != len(vecBefore.ChunkVecs) {
+		t.Error("backfill changed the vector index")
+	}
+}

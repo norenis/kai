@@ -54,6 +54,15 @@ func New(b *brain.FileBrain, brainPath string, cfg *config.Config) *Server {
 	s := &Server{brain: b, brainPath: brainPath, cfg: cfg}
 	s.loadSessions()
 
+	// Indexes built before note titles were stored get them filled in once.
+	go func() {
+		if n, err := b.BackfillTitles(); err != nil {
+			slog.Warn("backfill note titles", "err", err)
+		} else if n > 0 {
+			slog.Info("backfilled note titles", "notes", n)
+		}
+	}()
+
 	if cfg.Server.SSO.Enabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

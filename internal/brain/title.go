@@ -3,6 +3,7 @@ package brain
 import (
 	"path"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -89,4 +90,39 @@ func stripFrontMatter(content string) string {
 		}
 		rest = rest[nl+1:]
 	}
+}
+
+// BackfillTitles stores titles for index entries written before titles
+// existed, so upgraded brains show real titles without a full reindex. It
+// reads each affected note once and only rewrites the BM25 index; vectors
+// are untouched. Returns how many entries were filled.
+func (b *FileBrain) BackfillTitles() (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	idx, err := b.loadFullIndex()
+	if err != nil || idx == nil {
+		return 0, err
+	}
+	filled := 0
+	for p, d := range idx.Documents {
+		if d.Title != "" {
+			continue
+		}
+		bf, err := b.load(p)
+		if err != nil {
+			continue
+		}
+		d.Title = Title(p, bf.Content)
+		idx.Documents[p] = d
+		filled++
+	}
+	if filled == 0 {
+		return 0, nil
+	}
+	if err := b.saveFullIndex(idx); err != nil {
+		return 0, err
+	}
+	b.indexCache = idx
+	b.indexCacheAt = time.Now()
+	return filled, nil
 }
