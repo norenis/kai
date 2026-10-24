@@ -17,6 +17,43 @@ vectors.bin.gz
 clusters.json
 `
 
+// derivedFiles lists the entries of brainGitIgnore.
+func derivedFiles() []string {
+	return strings.Fields(brainGitIgnore)
+}
+
+// ensureGitIgnore makes the brain's .gitignore list every derived file,
+// keeping any lines the user added.
+func (g *GitBackend) ensureGitIgnore() error {
+	ignorePath := filepath.Join(g.brainPath, ".gitignore")
+	existing, err := os.ReadFile(ignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read .gitignore: %w", err)
+	}
+	have := map[string]bool{}
+	for _, line := range strings.Split(string(existing), "\n") {
+		have[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, f := range derivedFiles() {
+		if !have[f] {
+			missing = append(missing, f)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	content := string(existing)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += strings.Join(missing, "\n") + "\n"
+	if err := os.WriteFile(ignorePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("write .gitignore: %w", err)
+	}
+	return nil
+}
+
 // GitBackend syncs the brain directory using a nested git repository.
 type GitBackend struct {
 	brainPath string
@@ -46,10 +83,8 @@ func (g *GitBackend) Init(ctx context.Context) error {
 		fmt.Println("Initialized git repo in brain directory.")
 	}
 
-	// Write .gitignore for derived files.
-	ignorePath := filepath.Join(g.brainPath, ".gitignore")
-	if err := os.WriteFile(ignorePath, []byte(brainGitIgnore), 0644); err != nil {
-		return fmt.Errorf("write .gitignore: %w", err)
+	if err := g.ensureGitIgnore(); err != nil {
+		return err
 	}
 
 	// Set up remote if configured.
@@ -73,6 +108,16 @@ func (g *GitBackend) Init(ctx context.Context) error {
 
 // Push commits all changes and pushes to remote (if configured).
 func (g *GitBackend) Push(ctx context.Context, brainPath string) error {
+	// Brains initialised by older versions miss newer derived files.
+	if err := g.ensureGitIgnore(); err != nil {
+		return err
+	}
+	// Stop tracking derived files that an older .gitignore let through.
+	untrack := append([]string{"rm", "--cached", "--quiet", "--ignore-unmatch", "--"}, derivedFiles()...)
+	if _, err := g.git(ctx, untrack...); err != nil {
+		return fmt.Errorf("git rm --cached: %w", err)
+	}
+
 	// Stage all changes.
 	if _, err := g.git(ctx, "add", "-A"); err != nil {
 		return fmt.Errorf("git add: %w", err)
