@@ -60,10 +60,60 @@ function mountFps() {
   setInterval(() => { el.textContent = `${scene.fps.toFixed(0)} fps · ${scene.count} memories · pr ${scene.pixelRatio}`; }, 500);
 }
 
+const state = { name: '', vectors: null };
+
+const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const displayName = (s) => (s ? s[0].toUpperCase() + s.slice(1) : 'Kai');
+
+const HOUR_MS = 36e5;
+const RESTING_AFTER_MS = 48 * HOUR_MS;
+
+// statusLine describes the last write: coral "resting" after 48 h of quiet,
+// otherwise gold "learning" with a relative time.
+export function statusLine(lastWrite, now = Date.now()) {
+  const t = Date.parse(lastWrite || '');
+  if (!Number.isFinite(t)) return { resting: true, text: 'Resting · nothing learned yet' };
+  const ago = Math.max(0, now - t);
+  if (ago > RESTING_AFTER_MS) {
+    const days = Math.floor(ago / (24 * HOUR_MS));
+    return { resting: true, text: `Resting · learned ${days} days ago` };
+  }
+  const mins = Math.floor(ago / 6e4);
+  const rel = mins < 2 ? 'just now' : mins < 60 ? `${mins} minutes ago` : `${Math.floor(mins / 60)} ${mins < 120 ? 'hour' : 'hours'} ago`;
+  return { resting: false, text: `Learning · ${rel}` };
+}
+
+function renderIdentity() {
+  const v = state.vectors;
+  const memories = v ? v.nodes.length : 0;
+  const constellations = v?.clusters?.length;
+  const status = statusLine(v?.last_write);
+  document.getElementById('identity').innerHTML = `
+    <div class="k">Fluctlight of</div>
+    <h1 class="nm">${esc(state.name)}</h1>
+    <div class="n"><b>${fmtInt(memories)}</b>memories${constellations ? ` · ${constellations} constellations` : ''}</div>
+    <div class="s ${status.resting ? 'resting' : 'learning'}">${esc(status.text)}</div>
+    <div class="hr"></div>`;
+  document.getElementById('query').innerHTML = `
+    <span class="ic" aria-hidden="true"></span><span class="ph">Ask ${esc(state.name)} what it remembers…</span><kbd>⌘ K</kbd>`;
+}
+
+async function loadInfo() {
+  try {
+    const info = await api('api/info');
+    state.name = displayName(info.agent_name);
+    document.title = `Fluctlight of ${state.name}`;
+  } catch (err) {
+    console.error('load info', err);
+    state.name = 'Kai';
+  }
+}
+
 async function loadVectors() {
   try {
-    const vectors = await api('api/vectors');
-    scene.setVectors(vectors);
+    state.vectors = await api('api/vectors');
+    scene.setVectors(state.vectors);
     stage.dataset.memories = String(scene.count);
   } catch (err) {
     console.error('load vectors', err);
@@ -74,4 +124,6 @@ addEventListener('hashchange', () => go(screenFromHash()));
 go(screenFromHash());
 mountFoot();
 if (params.has('fps')) mountFps();
-loadVectors();
+Promise.all([loadInfo(), loadVectors()]).then(renderIdentity);
+// Keep the status line's relative time current.
+setInterval(() => { if (state.vectors) renderIdentity(); }, 60_000);

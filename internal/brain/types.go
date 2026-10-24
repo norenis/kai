@@ -99,6 +99,7 @@ type Posting struct {
 // DocEntry stores per-document metadata for the full index.
 type DocEntry struct {
 	Path        string   `json:"path"`
+	Title       string   `json:"title,omitempty"`
 	WordCount   int      `json:"word_count"`
 	Tags        []string `json:"tags"`
 	Updated     string   `json:"updated"`

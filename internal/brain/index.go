@@ -586,6 +586,7 @@ func indexFileIntoBM25(idx *FullIndex, path string, bf *BrainFile) []Chunk {
 
 	idx.Documents[path] = DocEntry{
 		Path:        path,
+		Title:       Title(path, bf.Content),
 		WordCount:   docWordCount,
 		Tags:        bf.Tags,
 		Updated:     bf.Updated.Time.Format(DateFormat),

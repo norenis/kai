@@ -43,6 +43,7 @@ type compactDocW struct {
 	A  int      `json:"a,omitempty"`  // access count
 	CC int      `json:"cc,omitempty"` // chunk count
 	Cf string   `json:"cf,omitempty"` // confidence
+	Ti string   `json:"ti,omitempty"` // title
 }
 
 type compactChunkW struct {
@@ -78,6 +79,7 @@ func toCompact(idx *FullIndex) *compactWire {
 			A:  d.AccessCount,
 			CC: d.ChunkCount,
 			Cf: d.Confidence,
+			Ti: d.Title,
 		}
 	}
 
@@ -154,6 +156,7 @@ func fromCompact(cw *compactWire) *FullIndex {
 			AccessCount: d.A,
 			ChunkCount:  d.CC,
 			Confidence:  d.Cf,
+			Title:       d.Ti,
 		}
 	}
 

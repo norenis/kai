@@ -640,6 +640,7 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	type fileEntry struct {
 		Path        string   `json:"path"`
+		Title       string   `json:"title"`
 		Category    string   `json:"category"`
 		Tags        []string `json:"tags"`
 		Confidence  string   `json:"confidence"`
@@ -665,6 +666,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 			}
 			entries = append(entries, fileEntry{
 				Path:        doc.Path,
+				Title:       doc.DisplayTitle(),
 				Category:    cat,
 				Tags:        tags,
 				Confidence:  doc.Confidence,
@@ -683,9 +685,10 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		entries = make([]fileEntry, 0, len(files))
 		for _, f := range files {
 			cat := strings.SplitN(f, "/", 2)[0]
-			entry := fileEntry{Path: f, Category: cat}
+			entry := fileEntry{Path: f, Title: brain.FilenameTitle(f), Category: cat}
 			bf, err := s.brain.Load(f)
 			if err == nil {
+				entry.Title = brain.Title(f, bf.Content)
 				entry.Tags = bf.Tags
 				entry.Confidence = bf.Confidence
 			}
@@ -703,6 +706,7 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 	type response struct {
 		Path       string   `json:"path"`
+		Title      string   `json:"title"`
 		Tags       []string `json:"tags"`
 		Confidence string   `json:"confidence"`
 		Content    string   `json:"content"`
@@ -723,6 +727,7 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, response{
 		Path:       bf.Path,
+		Title:      brain.Title(bf.Path, bf.Content),
 		Tags:       bf.Tags,
 		Confidence: bf.Confidence,
 		Content:    strings.TrimSpace(bf.Content),

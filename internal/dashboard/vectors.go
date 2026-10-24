@@ -4,8 +4,13 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/norenis/kai/internal/brain"
 )
 
 // maxVecNodes is a safety cap on nodes in the 3D graph.
@@ -19,13 +24,17 @@ const topNeighbors = 4
 const minSimilarity = 0.5
 
 type vecNode struct {
-	ID    string  `json:"id"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Z     float64 `json:"z"`
-	Doc   string  `json:"doc"`
-	Group string  `json:"group"`
-	Label string  `json:"label"`
+	ID      string  `json:"id"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Z       float64 `json:"z"`
+	Doc     string  `json:"doc"`
+	Group   string  `json:"group"`
+	Label   string  `json:"label"`
+	Title   string  `json:"title"`
+	Updated string  `json:"updated,omitempty"` // YYYY-MM-DD from front matter
+	Views   int     `json:"views"`             // read count of the note
+	Words   int     `json:"words"`             // word count of the note
 }
 
 type vecLink struct {
@@ -53,22 +62,37 @@ func (s *Server) handleVectorsBuild(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	type response struct {
-		Nodes    []vecNode `json:"nodes"`
-		Links    []vecLink `json:"links"`
-		Provider string    `json:"provider"`
-		Dims     int       `json:"dims"`
+		Nodes     []vecNode `json:"nodes"`
+		Links     []vecLink `json:"links"`
+		Provider  string    `json:"provider"`
+		Dims      int       `json:"dims"`
+		Notes     int       `json:"notes"`                // notes in the index, vault excluded
+		LastWrite string    `json:"last_write,omitempty"` // RFC 3339 time of the newest note change
 	}
+
+	idx, _ := s.brain.LoadFullIndexCached()
+	notes, lastWrite := s.noteStats(idx)
 
 	vi, err := s.brain.LoadVecIndex()
 	if err != nil || vi == nil || len(vi.ChunkVecs) == 0 {
-		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}})
+		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite})
 		return
 	}
 
 	entries := make([]vecEntry, 0, len(vi.ChunkVecs))
 	for k, v := range vi.ChunkVecs {
+		// The vault is PIN-gated; its notes never show in the sky.
+		if brain.IsVaultPath(chunkKeyDoc(k)) {
+			continue
+		}
 		entries = append(entries, vecEntry{key: k, vec: v})
 	}
+	if len(entries) == 0 {
+		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite})
+		return
+	}
+	// Map iteration order is random; sort so node order is stable per index.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].key < entries[j].key })
 
 	// Safety cap: truncate only if brain is extremely large.
 	if len(entries) > maxVecNodes {
@@ -107,17 +131,58 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 			Doc:   doc,
 			Group: firstSegment(doc),
 			Label: chunkKeyLabel(e.key),
+			Title: brain.FilenameTitle(doc),
+		}
+		if idx != nil {
+			if d, ok := idx.Documents[doc]; ok {
+				nodes[i].Title = d.DisplayTitle()
+				nodes[i].Updated = d.Updated
+				nodes[i].Views = d.AccessCount
+				nodes[i].Words = d.WordCount
+			}
 		}
 	}
 
 	links := buildVecLinks(entries, coords, topNeighbors, minSimilarity)
 
 	writeJSON(w, response{
-		Nodes:    nodes,
-		Links:    links,
-		Provider: vi.Provider,
-		Dims:     dims,
+		Nodes:     nodes,
+		Links:     links,
+		Provider:  vi.Provider,
+		Dims:      dims,
+		Notes:     notes,
+		LastWrite: lastWrite,
 	})
+}
+
+// noteStats counts non-vault notes and finds when the brain last learned
+// something. Front matter dates are day-precise; when the newest note's file
+// was modified on that same day, its modification time gives the hour.
+func (s *Server) noteStats(idx *brain.FullIndex) (notes int, lastWrite string) {
+	if idx == nil {
+		return 0, ""
+	}
+	var newest brain.DocEntry
+	for _, d := range idx.Documents {
+		if brain.IsVaultPath(d.Path) {
+			continue
+		}
+		notes++
+		if d.Updated > newest.Updated || (d.Updated == newest.Updated && d.Path < newest.Path) {
+			newest = d
+		}
+	}
+	day, err := time.ParseInLocation(brain.DateFormat, newest.Updated, time.Local)
+	if err != nil {
+		return notes, ""
+	}
+	when := day
+	if fi, err := os.Stat(filepath.Join(s.brainPath, newest.Path)); err == nil {
+		if mt := fi.ModTime(); mt.In(time.Local).Format(brain.DateFormat) == newest.Updated {
+			when = mt
+		}
+	}
+	return notes, when.Format(time.RFC3339)
 }
 
 // pca3D reduces an n×dims matrix to n×3 using power iteration PCA.
