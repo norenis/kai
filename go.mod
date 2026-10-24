@@ -4,9 +4,11 @@ go 1.25.0
 
 require (
 	github.com/adrg/frontmatter v0.2.0
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/spf13/cobra v1.8.1
 	github.com/xuri/excelize/v2 v2.10.1
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -14,6 +16,7 @@ require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
