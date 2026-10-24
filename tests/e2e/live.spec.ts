@@ -22,6 +22,7 @@ test.describe('Live inflow', () => {
   });
 
   test('an update to a known note plays a flow and glows its row on arrival', async ({ page }) => {
+    test.setTimeout(45_000);
     await ready(page);
     const path = 'knowledge/hydration-and-dough-strength.md';
     const read = await (await tool(page, 'brain_read', { path })).json();
@@ -29,7 +30,8 @@ test.describe('Live inflow', () => {
     await tool(page, 'brain_write', { path, content, tags: 'cooking,baking,bread' });
     await expect.poll(() => page.evaluate(() => (window as any).fluctlight.scene.flowsActive), { timeout: 3000 }).toBeGreaterThan(0);
     await expect(page.locator('#inflow .ev').first().locator('.t')).toHaveText('Hydration and dough strength');
-    await expect(page.locator(`#inflow .ev.new[data-path="${path}"]`)).toHaveCount(1, { timeout: 8000 });
+    // The ribbon takes ~5 s of scene time; software GL in CI renders slowly.
+    await expect(page.locator(`#inflow .ev.new[data-path="${path}"]`)).toHaveCount(1, { timeout: 25_000 });
   });
 
   test('a brand-new note appears in the sky after the vectors refresh', async ({ page }) => {
@@ -59,22 +61,16 @@ test.describe('Live inflow', () => {
   });
 
   test('hovering a memory in the sky locks it', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' }); // no auto-rotation: the target stays put
     await ready(page);
-    const pos = await page.evaluate(() => {
+    const at = await page.evaluate(() => {
       const s = (window as any).fluctlight.scene;
       const id = s.chunksOf('knowledge/table-driven-tests-in-go.md')[0];
-      return { id };
+      return s.screenPosition(id);
     });
-    expect(pos.id).toBeTruthy();
-    // Sweep the canvas until something is under the pointer.
-    let locked = null;
-    for (let y = 300; y < 600 && !locked; y += 12) {
-      for (let x = 500; x < 950 && !locked; x += 12) {
-        await page.mouse.move(x, y);
-        locked = await page.evaluate(() => (window as any).fluctlight.scene.locked);
-      }
-    }
-    expect(locked).toBeTruthy();
+    expect(at).toBeTruthy();
+    await page.mouse.move(at.x, at.y);
+    await expect.poll(() => page.evaluate(() => (window as any).fluctlight.scene.locked)).toBeTruthy();
     await expect(page.locator('#labels .lock')).toContainText('locked · fragment');
   });
 });

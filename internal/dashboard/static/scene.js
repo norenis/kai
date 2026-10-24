@@ -653,6 +653,13 @@ function createWebGLScene(host) {
       const i = data.index.get(id);
       return i === undefined ? null : [data.pos[i * 3], data.pos[i * 3 + 1], data.pos[i * 3 + 2]];
     },
+    // screenPosition is where a memory currently is, in host pixels.
+    screenPosition(id) {
+      const i = data.index.get(id);
+      if (i === undefined) return null;
+      const p = project(data.pos[i * 3], data.pos[i * 3 + 1], data.pos[i * 3 + 2]);
+      return p.behind ? null : { x: p.x, y: p.y };
+    },
     // chunksOf lists a note's chunk ids in index order.
     chunksOf(doc) {
       const d = data.docs.indexOf(doc);
@@ -784,6 +791,7 @@ function createFallback(host) {
     pickAt() { return null; },
     node(id) { const i = data.index.get(id); return i === undefined ? null : data.nodes[i]; },
     position() { return null; },
+    screenPosition() { return null; },
     chunksOf(doc) { return data.nodes.filter((n) => n.doc === doc).map((n) => n.id); },
     has(id) { return data.index.has(id); },
     fadeOf(id) { return data.index.has(id) ? 1 : null; },
