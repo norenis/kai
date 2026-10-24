@@ -383,6 +383,27 @@ func (vi *VecIndex) QueryVecWithEmbedder(query string, embedder Embedder) []VecR
 	return searchBruteForce(vi.ChunkVecs, vec)
 }
 
+// embedQuery returns the unit query vector: from the given embedder for
+// neural indexes, from the stored term vectors for LSI. Nil when the query
+// cannot be embedded (no embedder, API error, no known terms).
+func (vi *VecIndex) embedQuery(query string, embedder Embedder) []float32 {
+	if vi.Provider == "lsi" || vi.Provider == "" {
+		return vi.embedQueryLSI(query)
+	}
+	if embedder == nil {
+		if vi.Provider != "ollama" {
+			return nil
+		}
+		embedder = NewOllamaEmbedder(OllamaEmbedConfig{})
+	}
+	vec, err := embedder.Embed(query)
+	if err != nil {
+		return nil
+	}
+	normalizeF32(vec)
+	return vec
+}
+
 // searchBruteForce scans all vectors and returns sorted results.
 func searchBruteForce(chunkVecs map[string][]float32, qVec []float32) []VecResult {
 	results := make([]VecResult, 0, len(chunkVecs))
@@ -397,7 +418,10 @@ func searchBruteForce(chunkVecs map[string][]float32, qVec []float32) []VecResul
 	}
 
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
+		}
+		return results[i].ChunkKey < results[j].ChunkKey
 	})
 
 	return results

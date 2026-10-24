@@ -548,22 +548,35 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		ChunkID int     `json:"chunk_id"`
 		Score   float64 `json:"score"`
 		Snippet string  `json:"snippet"`
+		Title   string  `json:"title"`
+		Cluster int     `json:"cluster"` // constellation id, -1 when unclustered
 	}
 	type response struct {
 		Query   string         `json:"query"`
 		Results []searchResult `json:"results"`
+		Trace   *events.Trace  `json:"trace,omitempty"`
 	}
 
-	q := r.URL.Query().Get("q")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		writeJSON(w, response{Query: q, Results: []searchResult{}})
 		return
 	}
 
-	chunks := s.brain.QueryWithPRF(q)
+	// Hybrid search, as ask uses: BM25 with feedback expansion fused with
+	// vector similarity. The trace times each stage for the UI.
+	chunks, trace := s.brain.QueryHybridTraced(q)
 
-	var results []searchResult
+	var assign map[string]int
+	if cs, err := s.brain.Clusters(); err == nil && cs != nil {
+		assign = cs.Assign
+	}
+	idx, _ := s.brain.LoadFullIndexCached()
+
+	results := []searchResult{}
+	hits := []string{}
 	seen := make(map[string]int) // doc path → chunk count
+	notes := map[string]*brain.BrainFile{}
 	for _, cr := range chunks {
 		if seen[cr.DocPath] >= 2 || brain.IsVaultPath(cr.DocPath) {
 			continue // max 2 chunks per file; the vault never shows in search
@@ -571,42 +584,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if len(results) >= 20 {
 			break
 		}
-
-		snippet := ""
-		bf, err := s.brain.Load(cr.DocPath)
-		if err == nil {
-			content := strings.TrimSpace(bf.Content)
-			snippet = extractSnippet(content, cr.Offset, cr.Length, 200)
+		bf, ok := notes[cr.DocPath]
+		if !ok {
+			bf, _ = s.brain.Load(cr.DocPath)
+			notes[cr.DocPath] = bf
 		}
-
-		results = append(results, searchResult{
-			DocPath: cr.DocPath,
-			ChunkID: cr.ChunkID,
-			Score:   cr.Score,
-			Snippet: snippet,
-		})
+		res := searchResult{DocPath: cr.DocPath, ChunkID: cr.ChunkID, Score: cr.Score, Cluster: -1}
+		if bf != nil {
+			res.Snippet = brain.Snippet(strings.TrimSpace(bf.Content), cr.Offset, cr.Length, 200)
+			res.Title = brain.Title(cr.DocPath, bf.Content)
+		} else if idx != nil {
+			res.Title = idx.Documents[cr.DocPath].DisplayTitle()
+		}
+		key := fmt.Sprintf("%s#%d", cr.DocPath, cr.ChunkID)
+		if c, ok := assign[key]; ok {
+			res.Cluster = c
+		}
+		results = append(results, res)
+		hits = append(hits, key)
 		seen[cr.DocPath]++
 	}
 
-	writeJSON(w, response{Query: q, Results: results})
-}
-
-func extractSnippet(content string, offset, length, maxLen int) string {
-	if offset >= len(content) {
-		if len(content) > maxLen {
-			return content[:maxLen] + "..."
-		}
-		return content
-	}
-	end := offset + length
-	if end > len(content) {
-		end = len(content)
-	}
-	s := strings.TrimSpace(content[offset:end])
-	if len(s) > maxLen {
-		s = s[:maxLen] + "..."
-	}
-	return s
+	s.events.Publish(events.Event{Type: events.Search, Query: q, Chunks: hits, Trace: trace, Source: events.SourceDashboard})
+	writeJSON(w, response{Query: q, Results: results, Trace: trace})
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {

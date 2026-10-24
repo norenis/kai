@@ -125,3 +125,18 @@ func TestRetrieveNeverReturnsVault(t *testing.T) {
 		}
 	}
 }
+
+func TestRetrieveTraced(t *testing.T) {
+	b := setupTestBrain(t)
+	r := New(b, 10)
+	files, trace, err := r.RetrieveTraced(context.Background(), "Go backend services", 5)
+	if err != nil || trace == nil {
+		t.Fatalf("err %v trace %v", err, trace)
+	}
+	if len(trace.Stages) != 2 || trace.Stages[0].Name != "embed" || trace.Stages[1].Name != "recall" {
+		t.Fatalf("stages %+v", trace.Stages)
+	}
+	if trace.Stages[1].Count != len(files) || trace.Stages[1].MS < 0 || trace.Stages[0].MS < 0 {
+		t.Errorf("recall stage %+v for %d files", trace.Stages[1], len(files))
+	}
+}

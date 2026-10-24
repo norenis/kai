@@ -1,16 +1,20 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/norenis/kai/internal/brain"
 	"github.com/norenis/kai/internal/config"
+	"github.com/norenis/kai/internal/events"
 )
 
 // newDemoMux serves a reindexed copy of the synthetic demo brain.
@@ -154,5 +158,61 @@ func TestFilesAndFileCarryTitles(t *testing.T) {
 	decode(t, body, &file)
 	if file.Title != "Table driven tests in Go" {
 		t.Errorf("file title = %q", file.Title)
+	}
+}
+
+func TestSearchCarriesTraceTitlesClustersAndSafeSnippets(t *testing.T) {
+	mux, _ := newDemoMux(t)
+	for _, q := range []string{"nước dùng phở xương bò", "cà phê phin", "table driven tests"} {
+		_, body := get(t, mux, "/api/search?q="+url.QueryEscape(q))
+		var res struct {
+			Results []struct {
+				DocPath, Snippet, Title string
+				Cluster                 int
+			} `json:"results"`
+			Trace struct {
+				Stages []struct {
+					Name  string
+					MS    float64
+					Count int
+				}
+			} `json:"trace"`
+		}
+		decode(t, body, &res)
+		if len(res.Results) == 0 {
+			t.Fatalf("%q: no results", q)
+		}
+		if len(res.Trace.Stages) != 5 || res.Trace.Stages[0].Name != "embed" || res.Trace.Stages[4].Name != "fuse" {
+			t.Errorf("%q: trace %+v", q, res.Trace.Stages)
+		}
+		for _, r := range res.Results {
+			if r.Title == "" || r.Cluster < 0 {
+				t.Errorf("%q: result %s title %q cluster %d", q, r.DocPath, r.Title, r.Cluster)
+			}
+			if strings.ContainsRune(r.Snippet, '�') || !utf8.ValidString(r.Snippet) {
+				t.Errorf("%q: broken snippet %q", q, r.Snippet)
+			}
+		}
+	}
+}
+
+func TestSearchPublishesEvent(t *testing.T) {
+	ts, b, bus := newEventServer(t, nil)
+	_ = b
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := bus.Subscribe(ctx)
+	res, err := http.Get(ts.URL + "/api/search?q=anything")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	select {
+	case e := <-ch:
+		if e.Type != events.Search || e.Query != "anything" || e.Trace == nil {
+			t.Errorf("event %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no search event")
 	}
 }

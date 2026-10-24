@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/norenis/kai/internal/brain"
+	"github.com/norenis/kai/internal/events"
 )
 
 var stopWords = map[string]bool{
@@ -40,6 +42,15 @@ func New(b *brain.FileBrain, maxContextFiles int) *FileRetriever {
 // Returns synthetic BrainFile entries where Content contains only the
 // matched chunk, significantly reducing token count in the context.
 func (r *FileRetriever) Retrieve(ctx context.Context, query string, limit int) ([]*brain.BrainFile, error) {
+	files, _, err := r.RetrieveTraced(ctx, query, limit)
+	return files, err
+}
+
+// RetrieveTraced is Retrieve with timings for the ask trace: "embed" (the
+// query vector) and "recall" (search, fusion and loading the chunks; its
+// count is the number of context entries returned).
+func (r *FileRetriever) RetrieveTraced(ctx context.Context, query string, limit int) ([]*brain.BrainFile, *events.Trace, error) {
+	start := time.Now()
 	if limit > r.maxContextFiles {
 		limit = r.maxContextFiles
 	}
@@ -60,7 +71,7 @@ func (r *FileRetriever) Retrieve(ctx context.Context, query string, limit int) (
 	}
 	var candidates []scoredChunk
 
-	chunkResults := r.brain.QueryHybrid(query)
+	chunkResults, search := r.brain.QueryHybridTraced(query)
 	if len(chunkResults) > 0 {
 		// Track chunks per file to cap at MaxChunksPerFile.
 		fileChunkCount := make(map[string]int)
@@ -148,7 +159,19 @@ func (r *FileRetriever) Retrieve(ctx context.Context, query string, limit int) (
 		}
 	}
 
-	return results, nil
+	embedMS, embedDims := 0.0, 0
+	if search != nil && len(search.Stages) > 0 && search.Stages[0].Name == "embed" {
+		embedMS, embedDims = search.Stages[0].MS, search.Stages[0].Count
+	}
+	total := float64(time.Since(start).Microseconds()) / 1000
+	trace := &events.Trace{
+		Stages: []events.Stage{
+			{Name: "embed", MS: embedMS, Count: embedDims},
+			{Name: "recall", MS: max(0, total-embedMS), Count: len(results)},
+		},
+		TotalMS: total,
+	}
+	return results, trace, nil
 }
 
 // extractChunkText safely extracts a substring from content by offset and length.

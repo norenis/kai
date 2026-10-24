@@ -811,9 +811,7 @@ func queryChunksBM25(idx *FullIndex, terms []string) []ChunkResult {
 		})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
+	sort.Slice(results, func(i, j int) bool { return chunkBefore(results[i], results[j]) })
 	return results
 }
 
@@ -829,15 +827,14 @@ func (b *FileBrain) queryWithPRF(query string) []ChunkResult {
 	if err != nil {
 		return nil
 	}
+	terms := tokenizeAndStem(query)
+	return prfExpand(idx, terms, queryChunksBM25(idx, terms))
+}
 
-	originalTerms := tokenizeAndStem(query)
-	if len(originalTerms) == 0 {
-		return nil
-	}
-
-	// First pass.
-	firstPass := queryChunksBM25(idx, originalTerms)
-	if len(firstPass) == 0 {
+// prfExpand is the second PRF pass: it adds the most specific terms of the
+// first pass's top chunks to the query and searches again.
+func prfExpand(idx *FullIndex, originalTerms []string, firstPass []ChunkResult) []ChunkResult {
+	if len(originalTerms) == 0 || len(firstPass) == 0 {
 		return nil
 	}
 
@@ -896,7 +893,10 @@ func (b *FileBrain) queryWithPRF(query string) []ChunkResult {
 
 	// Pick the highest-IDF expansion terms.
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].idf > candidates[j].idf
+		if candidates[i].idf != candidates[j].idf {
+			return candidates[i].idf > candidates[j].idf
+		}
+		return candidates[i].term < candidates[j].term // stable expansion
 	})
 	expandCount := min(PRFExpandTerms, len(candidates))
 
@@ -920,4 +920,16 @@ func fieldBoost(field string) float64 {
 	default:
 		return FieldBoostContent
 	}
+}
+
+// chunkBefore orders chunk results by score, breaking ties by path and chunk
+// so equal scores come back in the same order every time.
+func chunkBefore(a, b ChunkResult) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	if a.DocPath != b.DocPath {
+		return a.DocPath < b.DocPath
+	}
+	return a.ChunkID < b.ChunkID
 }
