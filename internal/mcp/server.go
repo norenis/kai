@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	pathpkg "path"
 	"sort"
 	"strings"
 	"time"
@@ -40,9 +41,9 @@ const (
 const vaultCategory = "vault"
 
 // isVaultPath reports whether path falls under the reserved vault category.
+// The path is cleaned first, so "knowledge/../vault/x.md" counts as vault.
 func isVaultPath(path string) bool {
-	root := strings.SplitN(path, "/", 2)[0]
-	return root == vaultCategory
+	return brain.IsVaultPath(path)
 }
 
 // vaultPinOK does a constant-time comparison against the configured vault
@@ -605,7 +606,8 @@ func (s *Server) handleBrainWrite(ctx context.Context, req mcplib.CallToolReques
 	}
 	// Validate that the path starts with an allowed root category, or the
 	// reserved vault category (gated separately by pin below).
-	rootDir := strings.SplitN(path, "/", 2)[0]
+	// Judge the cleaned path: "knowledge/../vault/x.md" is a vault write.
+	rootDir := strings.SplitN(strings.TrimPrefix(pathpkg.Clean("/"+path), "/"), "/", 2)[0]
 	if rootDir == vaultCategory {
 		pin, _ := req.RequireString("pin")
 		if !s.vaultPinOK(pin) {

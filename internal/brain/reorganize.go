@@ -294,6 +294,10 @@ func (b *FileBrain) suggestRecategorization() (*ReorgPlan, error) {
 
 	plan := &ReorgPlan{}
 	for _, relPath := range files {
+		// The vault is a reserved category, not a misplaced one.
+		if IsVaultPath(relPath) {
+			continue
+		}
 		parts := strings.SplitN(relPath, string(filepath.Separator), 2)
 		if len(parts) != 2 {
 			continue
@@ -486,6 +490,9 @@ func (b *FileBrain) applyReorgPlan(plan *ReorgPlan) error {
 	session := time.Now().Format("20060102-150405")
 
 	for _, action := range plan.Actions {
+		if touchesVault(action) {
+			continue // never move, merge or consolidate vault notes
+		}
 		var err error
 		switch action.Type {
 		case ActionMerge:
@@ -623,6 +630,9 @@ func (b *FileBrain) Reorganize(opts ReorgOptions) (*ReorgPlan, error) {
 
 	addIfNew := func(actions []ReorgAction) {
 		for _, a := range actions {
+			if touchesVault(a) {
+				continue
+			}
 			conflict := consumed[a.TargetPath]
 			for _, src := range a.SourcePaths {
 				if consumed[src] {
@@ -677,6 +687,10 @@ func (b *FileBrain) Migrate(opts MigrateOptions) (*ReorgPlan, error) {
 
 	plan := &ReorgPlan{}
 	for _, relPath := range files {
+		// The vault is a reserved category, not a misplaced one.
+		if IsVaultPath(relPath) {
+			continue
+		}
 		parts := strings.SplitN(relPath, string(filepath.Separator), 2)
 
 		var currentCategory, filename string
@@ -802,4 +816,18 @@ func titleCase(s string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+// touchesVault reports whether a reorganization action reads or writes a
+// vault note. Such actions are never proposed or applied.
+func touchesVault(a ReorgAction) bool {
+	if IsVaultPath(a.TargetPath) {
+		return true
+	}
+	for _, p := range a.SourcePaths {
+		if IsVaultPath(p) {
+			return true
+		}
+	}
+	return false
 }

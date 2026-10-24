@@ -66,7 +66,8 @@ func (r *FileRetriever) Retrieve(ctx context.Context, query string, limit int) (
 		fileChunkCount := make(map[string]int)
 
 		for _, cr := range chunkResults {
-			if seen[cr.DocPath] {
+			// The vault is PIN-gated and never reaches an LLM prompt.
+			if seen[cr.DocPath] || brain.IsVaultPath(cr.DocPath) {
 				continue
 			}
 			if fileChunkCount[cr.DocPath] >= MaxChunksPerFile {
@@ -105,7 +106,7 @@ func (r *FileRetriever) Retrieve(ctx context.Context, query string, limit int) (
 		keywords := extractKeywords(query)
 		tagResults := r.brain.QueryIndex(keywords)
 		for _, tr := range tagResults {
-			if seen[tr.Path] {
+			if seen[tr.Path] || brain.IsVaultPath(tr.Path) {
 				continue
 			}
 			bf, err := r.brain.Load(tr.Path)

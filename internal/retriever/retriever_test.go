@@ -100,3 +100,28 @@ func TestRetrieveStopWords(t *testing.T) {
 		t.Error("expected to find opinions/golang.md despite stop words")
 	}
 }
+
+func TestRetrieveNeverReturnsVault(t *testing.T) {
+	dir := t.TempDir()
+	b := brain.New(dir)
+	os.MkdirAll(filepath.Join(dir, "opinions"), 0755)
+	os.WriteFile(filepath.Join(dir, "opinions", "golang.md"), []byte("---\ntags: [go, backend]\nconfidence: high\nsource: direct\nupdated: 2026-03-25\n---\n\nGo is great for backend services.\n"), 0644)
+	vault := filepath.Join(dir, "vault", "bank.md")
+	os.MkdirAll(filepath.Dir(vault), 0755)
+	os.WriteFile(vault, []byte("---\ntags: [go, backend, bank]\nconfidence: high\nsource: direct\nupdated: 2026-03-25\n---\n\nGo backend bank account number 0000 for the backend.\n"), 0644)
+	if err := b.RebuildIndex(); err != nil {
+		t.Fatal(err)
+	}
+	r := New(b, 10)
+	for _, q := range []string{"go backend bank account", "bank"} {
+		results, err := r.Retrieve(context.Background(), q, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, bf := range results {
+			if brain.IsVaultPath(bf.Path) {
+				t.Errorf("query %q returned vault file %s", q, bf.Path)
+			}
+		}
+	}
+}

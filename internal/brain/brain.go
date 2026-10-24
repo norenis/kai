@@ -385,6 +385,10 @@ func (b *FileBrain) Decay(dryRun bool) ([]DecayResult, error) {
 	now := time.Now()
 
 	for _, relPath := range files {
+		// Vault notes are kept verbatim; their confidence does not decay.
+		if IsVaultPath(relPath) {
+			continue
+		}
 		bf, err := b.load(relPath)
 		if err != nil {
 			continue

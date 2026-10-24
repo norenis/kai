@@ -308,3 +308,34 @@ func TestTeachHandler_NoLearnings(t *testing.T) {
 		t.Errorf("expected extraction failure message, got: %s", text)
 	}
 }
+
+func TestVaultPathTricksNeedPin(t *testing.T) {
+	srv, b := setupTestServer(t)
+	srv.cfg.Brain.VaultPin = "4321"
+	b.Save(&brain.BrainFile{Path: "vault/bank.md", Tags: []string{"bank"}, Confidence: "high", Source: "direct",
+		Updated: brain.DateOnly{Time: time.Now()}, Content: "\nAccount 0000.\n"})
+
+	for _, p := range []string{"vault/bank.md", "knowledge/../vault/bank.md", "./vault/bank.md"} {
+		req := mcplib.CallToolRequest{}
+		req.Params.Name = "brain_read"
+		req.Params.Arguments = map[string]interface{}{"path": p}
+		result, err := srv.handleBrainRead(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if text := result.Content[0].(mcplib.TextContent).Text; strings.Contains(text, "0000") {
+			t.Errorf("brain_read %q without pin returned vault content", p)
+		}
+
+		w := mcplib.CallToolRequest{}
+		w.Params.Name = "brain_write"
+		w.Params.Arguments = map[string]interface{}{"path": "knowledge/../vault/new.md", "content": "x", "tags": "x"}
+		result, err = srv.handleBrainWrite(context.Background(), w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.IsError {
+			t.Error("brain_write into the vault through ../ succeeded without a pin")
+		}
+	}
+}

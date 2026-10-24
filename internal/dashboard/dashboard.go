@@ -315,7 +315,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		files, _ := s.brain.ListAll()
 		resp.TotalFiles = len(files)
 		resp.IndexHealth = "missing"
+		resp.TotalFiles = 0
 		for _, f := range files {
+			if brain.IsVaultPath(f) {
+				continue
+			}
+			resp.TotalFiles++
 			cat := strings.SplitN(f, "/", 2)[0]
 			resp.Categories[cat]++
 		}
@@ -332,8 +337,13 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		resp.IndexHealth = "stale"
 	}
 
+	resp.TotalFiles = 0
 	tags := make(map[string]bool)
 	for _, doc := range idx.Documents {
+		if brain.IsVaultPath(doc.Path) {
+			continue
+		}
+		resp.TotalFiles++
 		cat := strings.SplitN(doc.Path, "/", 2)[0]
 		resp.Categories[cat]++
 		resp.TotalWords += doc.WordCount
@@ -493,6 +503,9 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 	entries := make([]activityEntry, 0, len(idx.Documents))
 	for _, doc := range idx.Documents {
+		if brain.IsVaultPath(doc.Path) {
+			continue
+		}
 		entries = append(entries, activityEntry{
 			Path:        doc.Path,
 			WordCount:   doc.WordCount,
@@ -538,8 +551,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	var results []searchResult
 	seen := make(map[string]int) // doc path → chunk count
 	for _, cr := range chunks {
-		if seen[cr.DocPath] >= 2 {
-			continue // max 2 chunks per file
+		if seen[cr.DocPath] >= 2 || brain.IsVaultPath(cr.DocPath) {
+			continue // max 2 chunks per file; the vault never shows in search
 		}
 		if len(results) >= 20 {
 			break
@@ -619,6 +632,9 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 
 	counts := make(map[string]int)
 	for _, doc := range idx.Documents {
+		if brain.IsVaultPath(doc.Path) {
+			continue
+		}
 		for _, t := range doc.Tags {
 			counts[t]++
 		}
@@ -659,6 +675,9 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if idx != nil && len(idx.Documents) > 0 {
 		entries = make([]fileEntry, 0, len(idx.Documents))
 		for _, doc := range idx.Documents {
+			if brain.IsVaultPath(doc.Path) {
+				continue
+			}
 			cat := strings.SplitN(doc.Path, "/", 2)[0]
 			tags := doc.Tags
 			if tags == nil {
@@ -684,6 +703,9 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = make([]fileEntry, 0, len(files))
 		for _, f := range files {
+			if brain.IsVaultPath(f) {
+				continue
+			}
 			cat := strings.SplitN(f, "/", 2)[0]
 			entry := fileEntry{Path: f, Title: brain.FilenameTitle(f), Category: cat}
 			bf, err := s.brain.Load(f)
@@ -718,6 +740,11 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing path parameter", http.StatusBadRequest)
 		return
 	}
+	// Vault notes need the vault PIN on every read, on top of the dashboard login.
+	if brain.IsVaultPath(path) && !s.vaultPinOK(r.Header.Get(vaultPinHeader)) {
+		http.Error(w, `{"error":"vault pin required"}`, http.StatusForbidden)
+		return
+	}
 
 	bf, err := s.brain.Load(path)
 	if err != nil {
@@ -750,6 +777,10 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	category := r.FormValue("category")
 	if category == "" {
 		category = "knowledge"
+	}
+	if brain.IsVaultPath(category) || strings.ContainsAny(category, `/\`) || strings.Contains(category, "..") {
+		writeJSON(w, map[string]interface{}{"error": "invalid category"})
+		return
 	}
 	tagsStr := r.FormValue("tags")
 	confidence := r.FormValue("confidence")
@@ -955,12 +986,14 @@ func (s *Server) getToolDefs() []ToolDef {
 		{Name: "brain_list", Description: "List all brain knowledge files", Params: nil},
 		{Name: "brain_read", Description: "Read a brain file", Params: []ToolParam{
 			{Name: "path", Type: "string", Required: true, Description: "File path (e.g. opinions/testing.md)"},
+			{Name: "pin", Type: "string", Required: false, Description: "Vault PIN, required when path starts with vault/"},
 		}},
 		{Name: "brain_search", Description: "Search brain by keywords", Params: []ToolParam{
 			{Name: "query", Type: "string", Required: true, Description: "Search keywords"},
 		}},
 		{Name: "brain_write", Description: "Write a brain file", Params: []ToolParam{
 			{Name: "path", Type: "string", Required: true, Description: "File path"},
+			{Name: "pin", Type: "string", Required: false, Description: "Vault PIN, required when path starts with vault/"},
 			{Name: "content", Type: "string", Required: true, Description: "Content to write"},
 			{Name: "tags", Type: "string", Required: true, Description: "Comma-separated tags"},
 			{Name: "confidence", Type: "string", Required: false, Description: "high, medium, or low"},
@@ -985,9 +1018,15 @@ func (s *Server) getToolDefs() []ToolDef {
 func (s *Server) executeTool(toolName string, params map[string]string) (string, error) {
 	switch toolName {
 	case "brain_list":
-		files, err := s.brain.ListAll()
+		all, err := s.brain.ListAll()
 		if err != nil {
 			return "", err
+		}
+		files := make([]string, 0, len(all))
+		for _, f := range all {
+			if !brain.IsVaultPath(f) {
+				files = append(files, f)
+			}
 		}
 		data, _ := json.MarshalIndent(files, "", "  ")
 		return string(data), nil
@@ -996,6 +1035,9 @@ func (s *Server) executeTool(toolName string, params map[string]string) (string,
 		path := params["path"]
 		if path == "" {
 			return "", fmt.Errorf("path is required")
+		}
+		if brain.IsVaultPath(path) && !s.vaultPinOK(params["pin"]) {
+			return "", fmt.Errorf("vault: invalid or missing pin")
 		}
 		bf, err := s.brain.Load(path)
 		if err != nil {
@@ -1025,9 +1067,12 @@ func (s *Server) executeTool(toolName string, params map[string]string) (string,
 			Score   float64 `json:"score"`
 		}
 		var results []searchResult
-		for i, cr := range chunks {
-			if i >= 10 {
+		for _, cr := range chunks {
+			if len(results) >= 10 {
 				break
+			}
+			if brain.IsVaultPath(cr.DocPath) {
+				continue
 			}
 			results = append(results, searchResult{Path: cr.DocPath, ChunkID: cr.ChunkID, Score: cr.Score})
 		}
@@ -1040,6 +1085,9 @@ func (s *Server) executeTool(toolName string, params map[string]string) (string,
 		tags := params["tags"]
 		if path == "" || content == "" || tags == "" {
 			return "", fmt.Errorf("path, content, and tags are required")
+		}
+		if brain.IsVaultPath(path) && !s.vaultPinOK(params["pin"]) {
+			return "", fmt.Errorf("vault: invalid or missing pin")
 		}
 		confidence := params["confidence"]
 		if confidence == "" {
@@ -1074,7 +1122,7 @@ func (s *Server) executeTool(toolName string, params map[string]string) (string,
 		seen := make(map[string]bool)
 		count := 0
 		for _, cr := range chunks {
-			if count >= 3 || seen[cr.DocPath] {
+			if count >= 3 || seen[cr.DocPath] || brain.IsVaultPath(cr.DocPath) {
 				continue
 			}
 			seen[cr.DocPath] = true
@@ -1204,7 +1252,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[string]bool)
 	count := 0
 	for _, cr := range chunks {
-		if count >= 3 || seen[cr.DocPath] {
+		if count >= 3 || seen[cr.DocPath] || brain.IsVaultPath(cr.DocPath) {
 			continue
 		}
 		seen[cr.DocPath] = true

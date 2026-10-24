@@ -16,6 +16,11 @@ import (
 // newDemoMux serves a reindexed copy of the synthetic demo brain.
 func newDemoMux(t *testing.T) (*http.ServeMux, string) {
 	t.Helper()
+	return newDemoMuxWith(t, config.Defaults())
+}
+
+func newDemoMuxWith(t *testing.T, cfg *config.Config) (*http.ServeMux, string) {
+	t.Helper()
 	src := "../../tests/fixtures/demo-brain"
 	dir := t.TempDir()
 	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
@@ -40,7 +45,6 @@ func newDemoMux(t *testing.T) (*http.ServeMux, string) {
 	if err := b.RebuildIndex(); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Defaults()
 	cfg.SessionsPath = t.TempDir()
 	srv := New(brain.New(dir), dir, cfg)
 	mux := http.NewServeMux()
