@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/adrg/frontmatter"
+	"github.com/norenis/kai/internal/events"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,6 +55,10 @@ type FileBrain struct {
 	clCache    *ClusterSet
 	clCacheFor *VecIndex
 	clCacheIdx *FullIndex
+
+	// Live activity (nil: not published). See SetEvents.
+	events      *events.Bus
+	eventSource string
 }
 
 // New creates a new FileBrain rooted at the given directory.
@@ -186,7 +191,15 @@ func (b *FileBrain) Save(bf *BrainFile) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.indexCache = nil // invalidate — file content changed
-	return b.save(bf)
+	typ := events.Update
+	if !b.exists(bf.Path) {
+		typ = events.Create
+	}
+	if err := b.save(bf); err != nil {
+		return err
+	}
+	b.emit(typ, bf, "")
+	return nil
 }
 
 // loadFullIndexCached returns the cached full index if fresh, otherwise loads from disk.
@@ -301,6 +314,7 @@ func (b *FileBrain) Learn(learnings []Learning) error {
 			if err := b.save(bf); err != nil {
 				return fmt.Errorf("create %s: %w", relPath, err)
 			}
+			b.emit(events.Learn, bf, "")
 
 		case "append":
 			existing, err := b.load(relPath)
@@ -317,6 +331,7 @@ func (b *FileBrain) Learn(learnings []Learning) error {
 				if err := b.save(bf); err != nil {
 					return fmt.Errorf("create %s: %w", relPath, err)
 				}
+				b.emit(events.Learn, bf, "")
 				continue
 			}
 			// Dedup: skip if leading text of new content already appears verbatim.
@@ -333,6 +348,7 @@ func (b *FileBrain) Learn(learnings []Learning) error {
 			if err := b.save(existing); err != nil {
 				return fmt.Errorf("append %s: %w", relPath, err)
 			}
+			b.emit(events.Learn, existing, "")
 
 		case "replace":
 			bf := &BrainFile{
@@ -346,6 +362,7 @@ func (b *FileBrain) Learn(learnings []Learning) error {
 			if err := b.save(bf); err != nil {
 				return fmt.Errorf("replace %s: %w", relPath, err)
 			}
+			b.emit(events.Learn, bf, "")
 		}
 	}
 	return nil
@@ -366,7 +383,11 @@ func (b *FileBrain) touch(relPath string) error {
 	}
 	bf.AccessCount++
 	bf.LastAccessed = DateOnly{time.Now()}
-	return b.save(bf)
+	if err := b.save(bf); err != nil {
+		return err
+	}
+	b.emit(events.Touch, bf, "")
+	return nil
 }
 
 // Decay lowers confidence on brain files that haven't been updated in a while.
@@ -424,6 +445,7 @@ func (b *FileBrain) Decay(dryRun bool) ([]DecayResult, error) {
 			if err := b.save(bf); err != nil {
 				return results, fmt.Errorf("save %s: %w", relPath, err)
 			}
+			b.emit(events.Update, bf, "")
 		}
 	}
 

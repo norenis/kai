@@ -15,6 +15,7 @@ import (
 	kai "github.com/norenis/kai"
 	"github.com/norenis/kai/internal/brain"
 	"github.com/norenis/kai/internal/config"
+	"github.com/norenis/kai/internal/events"
 	"github.com/norenis/kai/internal/dashboard"
 	"github.com/norenis/kai/internal/module"
 	"github.com/norenis/kai/internal/prompt"
@@ -157,8 +158,13 @@ func (s *Server) ServeHTTP(addr, token string) error {
 		httpServer.ServeHTTP(w, r)
 	}))
 
+	// One event bus serves MCP writes and the dashboard's live stream.
+	bus := events.NewBus()
+	s.brain.SetEvents(bus, events.SourceMCP)
+
 	// Mount dashboard at /dashboard.
 	dash := dashboard.New(s.brain, s.cfg.Brain.Path, s.cfg)
+	dash.SetEvents(bus)
 	// Set router for dashboard chat.
 	if s.router != nil {
 		dash.SetRouter(s.router)
@@ -653,6 +659,7 @@ func (s *Server) handleBrainWrite(ctx context.Context, req mcplib.CallToolReques
 		Content:    "\n" + content + "\n",
 	}
 
+	bf.WrittenBy = events.SourceMCP
 	if err := s.brain.Save(bf); err != nil {
 		return mcplib.NewToolResultError(fmt.Sprintf("save brain file: %v", err)), nil
 	}
@@ -1007,6 +1014,7 @@ func (s *Server) handleTasksTool(ctx context.Context, req mcplib.CallToolRequest
 		}
 		bf.Content = brain.AppendTask(bf.Content, text, priority)
 		bf.Updated = brain.DateOnly{Time: time.Now()}
+		bf.WrittenBy = events.SourceMCP
 		if err := s.brain.Save(bf); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("save tasks: %v", err)), nil
 		}
@@ -1029,6 +1037,7 @@ func (s *Server) handleTasksTool(ctx context.Context, req mcplib.CallToolRequest
 		}
 		bf.Content = newContent
 		bf.Updated = brain.DateOnly{Time: time.Now()}
+		bf.WrittenBy = events.SourceMCP
 		if err := s.brain.Save(bf); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("save tasks: %v", err)), nil
 		}
@@ -1054,6 +1063,7 @@ func (s *Server) handleTasksTool(ctx context.Context, req mcplib.CallToolRequest
 		}
 		bf.Content = newContent
 		bf.Updated = brain.DateOnly{Time: time.Now()}
+		bf.WrittenBy = events.SourceMCP
 		if err := s.brain.Save(bf); err != nil {
 			return mcplib.NewToolResultError(fmt.Sprintf("save tasks: %v", err)), nil
 		}

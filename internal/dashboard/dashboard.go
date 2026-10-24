@@ -22,6 +22,7 @@ import (
 	kai "github.com/norenis/kai"
 	"github.com/norenis/kai/internal/brain"
 	"github.com/norenis/kai/internal/config"
+	"github.com/norenis/kai/internal/events"
 	"github.com/norenis/kai/internal/module"
 	"github.com/norenis/kai/internal/router"
 	bsync "github.com/norenis/kai/internal/sync"
@@ -42,6 +43,7 @@ type Server struct {
 	router      *router.Router
 	oidc        *oidcAuth
 	oauthStates sync.Map // state → expiry (unix seconds), CSRF protection for the OIDC login round-trip
+	events      *events.Bus
 }
 
 // SetRouter sets the router for dashboard chat.
@@ -51,7 +53,7 @@ func (s *Server) SetRouter(r *router.Router) {
 
 // New creates a dashboard Server.
 func New(b *brain.FileBrain, brainPath string, cfg *config.Config) *Server {
-	s := &Server{brain: b, brainPath: brainPath, cfg: cfg}
+	s := &Server{brain: b, brainPath: brainPath, cfg: cfg, events: b.Events()}
 	s.loadSessions()
 
 	// Indexes built before note titles were stored get them filled in once.
@@ -188,6 +190,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/vectors/build", auth(s.handleVectorsBuild))
 	mux.HandleFunc("/api/plugins", auth(s.handlePlugins))
 	mux.HandleFunc("/api/plugins/run", auth(s.handlePluginRun))
+	mux.HandleFunc("/api/events", auth(s.handleEvents))
 }
 
 // withAuth wraps a handler with PIN and/or SSO authentication if configured.
@@ -454,6 +457,7 @@ func (s *Server) handleTasksToggle(w http.ResponseWriter, r *http.Request) {
 
 	bf.Content = newContent
 	bf.Updated = brain.DateOnly{Time: time.Now()}
+	bf.WrittenBy = events.SourceDashboard
 	if err := s.brain.Save(bf); err != nil {
 		http.Error(w, "failed to save tasks", http.StatusInternalServerError)
 		return
@@ -485,6 +489,7 @@ func (s *Server) handleTasksAdd(w http.ResponseWriter, r *http.Request) {
 
 	bf.Content = brain.AppendTask(bf.Content, req.Text, req.Priority)
 	bf.Updated = brain.DateOnly{Time: time.Now()}
+	bf.WrittenBy = events.SourceDashboard
 	if err := s.brain.Save(bf); err != nil {
 		http.Error(w, "failed to save tasks", http.StatusInternalServerError)
 		return
@@ -843,6 +848,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		bf.WrittenBy = events.SourceDashboard
 		if err := s.brain.Save(bf); err != nil {
 			results = append(results, importResult{
 				Path:  fileHeader.Filename,
@@ -1113,6 +1119,7 @@ func (s *Server) executeTool(toolName string, params map[string]string) (string,
 			Source:     "dashboard",
 			Content:    "\n" + content + "\n",
 		}
+		bf.WrittenBy = events.SourceDashboard
 		if err := s.brain.Save(bf); err != nil {
 			return "", err
 		}

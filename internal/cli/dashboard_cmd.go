@@ -10,6 +10,7 @@ import (
 	"github.com/norenis/kai/internal/brain"
 	"github.com/norenis/kai/internal/config"
 	"github.com/norenis/kai/internal/dashboard"
+	"github.com/norenis/kai/internal/events"
 	bsync "github.com/norenis/kai/internal/sync"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +42,10 @@ func newDashboardCmd() *cobra.Command {
 			}
 
 			b := brain.New(brainPath)
+			bus := events.NewBus()
+			b.SetEvents(bus, events.SourceDashboard)
 			srv := dashboard.New(b, brainPath, cfg)
+			srv.SetEvents(bus)
 
 			// Initialize syncer if configured.
 			syncer := dashboardSyncer(cfg, brainPath)

@@ -59,6 +59,10 @@ type BrainFile struct {
 	AccessCount  int      `yaml:"access_count,omitempty"`
 	LastAccessed DateOnly `yaml:"last_accessed,omitempty"`
 	Content      string   `yaml:"-"`
+
+	// WrittenBy names the writer (mcp, dashboard, cli) for live events. It
+	// is not stored; Source is the note's provenance, not the last writer.
+	WrittenBy string `yaml:"-"`
 }
 
 // Learning represents a piece of knowledge extracted from conversation.

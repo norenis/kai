@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/norenis/kai/internal/events"
 )
 
 // TrashDir is the subdirectory inside the brain root where trashed files are kept.
@@ -457,6 +459,7 @@ func (b *FileBrain) trashFile(relPath, trashSession string) error {
 	if err != nil {
 		return err
 	}
+	b.emitDelete(relPath) // before the rename, while the index still knows its chunks
 	return os.Rename(src, dst)
 }
 
@@ -552,6 +555,7 @@ func (b *FileBrain) applyMergeOrConsolidate(action ReorgAction, trashSession str
 	if err := b.save(target); err != nil {
 		return err
 	}
+	b.emit(events.Update, target, "")
 
 	for _, srcPath := range merged {
 		_ = b.trashFile(srcPath, trashSession)
@@ -583,6 +587,7 @@ func (b *FileBrain) applyMove(action ReorgAction, trashSession string) error {
 	if err := b.save(bf); err != nil {
 		return err
 	}
+	b.emit(events.Create, bf, "")
 
 	return b.trashFile(srcPath, trashSession)
 }
