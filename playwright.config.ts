@@ -5,6 +5,9 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
+  // Headless Chromium renders WebGL in software (a few fps), which slows
+  // timers and paints while the scene runs.
+  expect: { timeout: 10_000 },
   retries: 0,
   // One shared demo brain that some tests write to: run files one at a time.
   workers: 1,

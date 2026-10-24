@@ -617,9 +617,11 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Commit     string `json:"commit"`
 		BuildDate  string `json:"build_date"`
 		ListenAddr string `json:"listen_addr"`
+		LLM        bool   `json:"llm"` // an LLM provider is connected (ask is available)
 	}
 
 	writeJSON(w, response{
+		LLM:        s.router != nil,
 		AgentName:  s.cfg.AgentName(),
 		UserName:   s.cfg.UserName(),
 		Version:    kai.Version,

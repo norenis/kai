@@ -63,19 +63,21 @@ export function mountInflow(el, scene, { titles, onOpen, onLock, onWrite }) {
 
   function render() {
     el.innerHTML = `<div class="k">Inflow</div>` + rows.map((r) => `
-      <div class="ev${r.glow ? ' new' : ''}" data-key="${esc(r.key)}" data-path="${esc(r.path)}" role="button" tabindex="0">
+      <div class="ev" data-key="${esc(r.key)}" data-path="${esc(r.path)}"${r.arrived ? ' data-arrived="1"' : ''} role="button" tabindex="0">
         <div class="t">${esc(titleOf(r.path))}</div>
         <div class="sc"><i>${VERB[r.type] || r.type}</i> · ${esc(relativeTime(r.when))}</div>
       </div>`).join('');
-    for (const r of rows) r.glow = false;
   }
 
   function glowRow(key) {
+    const r = rows.find((x) => x.key === key);
+    if (r) r.arrived = true;
     const row = el.querySelector(`.ev[data-key="${CSS.escape(key)}"]`);
     if (!row) return;
     row.classList.remove('new');
     void row.offsetWidth; // restart the animation
     row.classList.add('new');
+    row.dataset.arrived = '1';
   }
 
   function push(row) {

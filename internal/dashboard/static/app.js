@@ -4,8 +4,10 @@
 import { createScene } from 'app/scene.js';
 import { mountLabels, constellationName } from 'app/labels.js';
 import { mountInflow, connectEvents, relativeTime } from 'app/inflow.js';
+import { mountSearch } from 'app/cmdk.js';
 
 const SCREENS = ['sky', 'read', 'sys'];
+let search = null; // the ⌘K sheet, mounted below
 
 const stage = document.getElementById('stage');
 const params = new URLSearchParams(location.search);
@@ -40,7 +42,7 @@ function go(screen) {
     if (on) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   });
-  scene.setView(screen);
+  scene.setView(search?.open ? 'search' : screen);
 }
 
 // Bottom-right readout: right ascension follows the rotating equator.
@@ -106,6 +108,7 @@ async function loadInfo() {
   try {
     const info = await api('api/info');
     state.name = displayName(info.agent_name);
+    state.llm = !!info.llm;
     document.title = `Fluctlight of ${state.name}`;
   } catch (err) {
     console.error('load info', err);
@@ -220,6 +223,23 @@ const inflow = mountInflow(document.getElementById('inflow'), scene, {
   onWrite,
 });
 window.fluctlight.inflow = inflow;
+
+// ---------- ⌘K search sheet ----------
+
+search = mountSearch(document.getElementById('sheet'), {
+  api,
+  scene,
+  labels,
+  clusters: () => state.vectors?.clusters,
+  llm: () => !!state.llm,
+  onOpen: openNote,
+  onToggle(open) {
+    stage.dataset.sheet = open ? 'search' : '';
+    scene.setView(open ? 'search' : screenFromHash());
+  },
+});
+window.fluctlight.search = search;
+document.getElementById('query').addEventListener('click', () => search.show());
 
 addEventListener('hashchange', () => go(screenFromHash()));
 go(screenFromHash());

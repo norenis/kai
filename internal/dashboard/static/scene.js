@@ -528,6 +528,7 @@ function createWebGLScene(host) {
     cam.position.copy(ctl.target).add(off);
 
     flows.update(dt, cam);
+    breathe(t);
     applyEffects(dt);
     updateLock(t);
 
@@ -561,6 +562,25 @@ function createWebGLScene(host) {
     if (moved) g.attributes.position.needsUpdate = true;
     fx.dirty = false;
     fxActive = glowing;
+  }
+
+  // Hits breathe (staggered) on search and ask screens; others stay dimmed.
+  function breathe(time) {
+    if (!soul || !highlight.size || (view !== 'search' && view !== 'ask')) return;
+    for (const i of highlight) {
+      lit[i] = reducedMotion ? 1.4 : 1.15 + 0.45 * Math.sin(time * 1.8 + i * 0.37);
+    }
+    fxActive = true;
+  }
+
+  // recallSink is the world point under the sheet's top edge.
+  let recallNdc = null; // () => {x0, x1, y} in NDC
+  const sinkV = new THREE.Vector3();
+  function recallSink() {
+    const n = recallNdc?.();
+    if (!n) return null;
+    sinkV.set(n.x0 + Math.random() * (n.x1 - n.x0), n.y, 0.5).unproject(cam).sub(cam.position).normalize();
+    return cam.position.clone().add(sinkV.multiplyScalar(cam.position.distanceTo(ctl.target) * 0.55));
   }
 
   function updateLock(time) {
@@ -637,6 +657,13 @@ function createWebGLScene(host) {
       const i = flows.spawn(ev, { reduced: reducedMotion, onArrive });
       return i >= 0 ? data.nodes[i].id : null;
     },
+    // recall streams fibres from these chunks to the area returned by
+    // ndc() ({x0, x1, y} in normalised device coordinates); null stops them.
+    recall(ids, ndc) {
+      recallNdc = ndc;
+      const indices = reducedMotion || !ids ? [] : ids.map((id) => data.index.get(id)).filter((i) => i !== undefined);
+      flows.setRecall(indices, recallSink);
+    },
     // lock puts the coral ring on a chunk (null releases it).
     lock(id) {
       const i = id == null ? -1 : data.index.get(id);
@@ -677,6 +704,7 @@ function createWebGLScene(host) {
     get running() { return running; },
     get fps() { return fps; },
     get pixelRatio() { return pixelRatio; },
+    get view() { return view; },
     // worstFrameMs returns the longest frame since the last call (perf checks).
     worstFrameMs() { const w = worstFrame; worstFrame = 0; return w * 1000; },
     get reducedMotion() { return reducedMotion; },
@@ -786,6 +814,7 @@ function createFallback(host) {
     setView() {},
     highlight() {},
     onEvent(ev, { onArrive = null } = {}) { onArrive?.(); return null; },
+    recall() {},
     lock() {},
     get locked() { return null; },
     pickAt() { return null; },
@@ -796,6 +825,7 @@ function createFallback(host) {
     has(id) { return data.index.has(id); },
     fadeOf(id) { return data.index.has(id) ? 1 : null; },
     get flowsActive() { return 0; },
+    get view() { return 'sky'; },
     onFrame(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get running() { return false; },
     get fps() { return 0; },

@@ -49,6 +49,11 @@ export function createFlows({ scene3, getData, fx }) {
   });
 
   const deleting = []; // {i, t}
+
+  // Recall fibres: while set, fine particles stream from these chunks to a
+  // sink point (the top edge of the open sheet).
+  let recall = null; // {indices, sink: () => THREE.Vector3}
+  let recallBudget = 0;
   let adjacency = null, adjacencyFor = null;
   const tmp = new THREE.Vector3();
 
@@ -155,13 +160,43 @@ export function createFlows({ scene3, getData, fx }) {
     return target;
   }
 
+  function spawnFibre(sink) {
+    const j = P.findIndex((f) => !f.on);
+    if (j < 0) return;
+    const i = recall.indices[(Math.random() * recall.indices.length) | 0];
+    const p0 = chunkPos(i);
+    const p1 = p0.clone().add(p0.clone().normalize().multiplyScalar(0.5 + Math.random() * 0.4));
+    const p3 = sink.clone();
+    const p2 = p3.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.5 + Math.random() * 0.4, 0));
+    Object.assign(P[j], {
+      on: true, kind: 'fibre', p0, p1, p2, p3, t: 0, speed: 0.21 + Math.random() * 0.21,
+      s: 0.11 + Math.random() * 0.08, c: Math.random() < 0.7 ? [1, 1, 1] : [1, 0.92, 0.75], head: null,
+    });
+    active++;
+  }
+
   function update(dt, camera) {
+    if (recall && recall.indices.length) {
+      // About one fibre per frame at 60 fps, independent of frame rate.
+      recallBudget += dt * 55;
+      const sink = recallBudget >= 1 ? recall.sink() : null;
+      while (recallBudget >= 1 && sink) { spawnFibre(sink); recallBudget--; }
+    }
     if (active > 0) {
       for (let j = 0; j < CAPACITY; j++) {
         const f = P[j];
         if (!f.on) { size[j] = 0; continue; }
         f.t += f.speed * dt;
         if (f.t < 0) { size[j] = 0; continue; }
+        if (f.kind === 'fibre') {
+          if (f.t >= 1 || !recall) { f.on = false; active--; size[j] = 0; continue; }
+          bezier(f, f.t, tmp);
+          pos[j * 3] = tmp.x; pos[j * 3 + 1] = tmp.y; pos[j * 3 + 2] = tmp.z;
+          col[j * 3] = f.c[0]; col[j * 3 + 1] = f.c[1]; col[j * 3 + 2] = f.c[2];
+          size[j] = f.s;
+          bright[j] = Math.sin(f.t * Math.PI) * 0.9;
+          continue;
+        }
         bezier(f, ease(Math.min(1, f.t)), tmp);
         pos[j * 3] = tmp.x; pos[j * 3 + 1] = tmp.y; pos[j * 3 + 2] = tmp.z;
         col[j * 3] = f.c[0]; col[j * 3 + 1] = f.c[1]; col[j * 3 + 2] = f.c[2];
@@ -204,6 +239,11 @@ export function createFlows({ scene3, getData, fx }) {
     update,
     decay: (dt) => Math.pow(BOOST_DECAY_PER_FRAME, dt * 60),
     setScale(s) { mat.uniforms.uScale.value = s * FLOW_SCALE; },
+    // setRecall streams fibres from chunk indices to sink(); null stops them.
+    setRecall(indices, sink) {
+      recall = indices && indices.length ? { indices, sink } : null;
+      recallBudget = 0;
+    },
     get active() { return active; },
     reset() {
       for (const f of P) f.on = false;

@@ -1,10 +1,14 @@
 package brain
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
+
+// headingMarks are markdown heading prefixes, noise in a one-line snippet.
+var headingMarks = regexp.MustCompile(`(?m)^#{1,6}[ \t]+`)
 
 // Snippet returns up to maxRunes characters of a chunk of content (offset and
 // length in bytes, as stored in the index). It never splits a UTF-8
@@ -24,7 +28,7 @@ func Snippet(content string, offset, length, maxRunes int) string {
 	for end < len(content) && !utf8.RuneStart(content[end]) {
 		end++
 	}
-	s := strings.TrimSpace(content[start:end])
+	s := strings.TrimSpace(headingMarks.ReplaceAllString(content[start:end], ""))
 	if utf8.RuneCountInString(s) <= maxRunes {
 		return s
 	}

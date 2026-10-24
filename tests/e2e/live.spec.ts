@@ -31,7 +31,7 @@ test.describe('Live inflow', () => {
     await expect.poll(() => page.evaluate(() => (window as any).fluctlight.scene.flowsActive), { timeout: 3000 }).toBeGreaterThan(0);
     await expect(page.locator('#inflow .ev').first().locator('.t')).toHaveText('Hydration and dough strength');
     // The ribbon takes ~5 s of scene time; software GL in CI renders slowly.
-    await expect(page.locator(`#inflow .ev.new[data-path="${path}"]`)).toHaveCount(1, { timeout: 25_000 });
+    await expect(page.locator(`#inflow .ev[data-arrived="1"][data-path="${path}"]`)).toHaveCount(1, { timeout: 25_000 });
   });
 
   test('a brand-new note appears in the sky after the vectors refresh', async ({ page }) => {

@@ -41,6 +41,9 @@ func TestSnippetPrefersWordBoundary(t *testing.T) {
 	if got := Snippet(text, 1, len(text)-1, 100); got != text {
 		t.Errorf("mid-rune offset: %q", got)
 	}
+	if got := Snippet("# Feeding a starter\n\nFeed it daily.", 0, 0, 100); got != "Feeding a starter\n\nFeed it daily." {
+		t.Errorf("heading marks: %q", got)
+	}
 	// Out-of-range offset falls back to the whole text.
 	if got := Snippet("abc", 99, 5, 100); got != "abc" {
 		t.Errorf("bad offset: %q", got)
