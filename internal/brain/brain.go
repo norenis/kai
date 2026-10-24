@@ -48,6 +48,12 @@ type FileBrain struct {
 	indexCacheAt time.Time
 	vecCache     *VecIndex
 	vecCacheAt   time.Time
+
+	// Constellations, valid for the vector/full index they were derived from.
+	clMu       sync.Mutex
+	clCache    *ClusterSet
+	clCacheFor *VecIndex
+	clCacheIdx *FullIndex
 }
 
 // New creates a new FileBrain rooted at the given directory.

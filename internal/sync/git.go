@@ -14,6 +14,7 @@ const brainGitIgnore = `index.json
 index_full.json
 index_full.json.gz
 vectors.bin.gz
+clusters.json
 `
 
 // GitBackend syncs the brain directory using a nested git repository.

@@ -125,6 +125,7 @@ var skipFiles = map[string]bool{
 	".DS_Store":         true,
 	"index_full.json.gz": true,
 	"vectors.bin.gz":     true,
+	"clusters.json":      true,
 }
 
 // shouldSkipSync returns true if a relative path should be excluded from sync.

@@ -62,8 +62,33 @@ func TestVectorsCarryNoteFieldsAndHideVault(t *testing.T) {
 		Nodes     []vecNode `json:"nodes"`
 		Notes     int       `json:"notes"`
 		LastWrite string    `json:"last_write"`
+		Clusters  []struct {
+			ID      int    `json:"id"`
+			Label   string `json:"label"`
+			Size    int    `json:"size"`
+			Numeral string `json:"numeral"`
+		} `json:"clusters"`
 	}
 	decode(t, body, &res)
+
+	if len(res.Clusters) < 5 {
+		t.Fatalf("clusters = %d, want >= 5", len(res.Clusters))
+	}
+	sizes := map[int]int{}
+	for _, n := range res.Nodes {
+		if n.Cluster < 0 || n.Cluster >= len(res.Clusters) {
+			t.Fatalf("node %s has cluster %d", n.ID, n.Cluster)
+		}
+		sizes[n.Cluster]++
+	}
+	for i, c := range res.Clusters {
+		if c.ID != i || c.Label == "" || c.Numeral == "" || c.Size != sizes[i] {
+			t.Errorf("cluster %d = %+v (counted %d nodes)", i, c, sizes[i])
+		}
+		if i > 0 && c.Size > res.Clusters[i-1].Size {
+			t.Errorf("clusters not sorted by size at %d", i)
+		}
+	}
 
 	if len(res.Nodes) == 0 {
 		t.Fatal("no nodes")

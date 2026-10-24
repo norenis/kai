@@ -248,6 +248,8 @@ func (b *FileBrain) rebuildFullIndex() error {
 	ctx, cancel := context.WithTimeout(context.Background(), VecIndexBuildTimeout)
 	vi := b.buildVecIndexUnlocked(ctx, idx, chunkTexts)
 	cancel()
+	// Constellations are part of the reindex; k-means also runs unlocked.
+	clusters := ComputeClusters(vi, idx)
 	b.mu.Lock() // Re-acquire before modifying cached state
 
 	if vi != nil {
@@ -257,6 +259,9 @@ func (b *FileBrain) rebuildFullIndex() error {
 		}
 		b.vecCache = vi
 		b.vecCacheAt = time.Now()
+		if err := b.storeClusters(clusters, vi, idx); err != nil {
+			slog.Warn("save clusters", "err", err)
+		}
 	} else {
 		slog.Debug("vector index skipped (no embedder available)")
 	}

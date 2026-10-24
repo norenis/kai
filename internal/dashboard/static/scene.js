@@ -20,6 +20,7 @@ export const VIEWS = {
 };
 
 const R = 1.5; // armillary radius
+export const ARMILLARY_RADIUS = R;
 const MAX_FILAMENTS = 1500;
 const MAX_PIXEL_RATIO = 1.5;
 // Adaptive quality: below this fps the pixel ratio steps down (never up).
@@ -55,6 +56,7 @@ export function prepareVectors(payload, now = Date.now()) {
   const docs = [];
   const docIndex = new Map();
   const docOf = new Int32Array(n);
+  const cluster = new Int16Array(n);
 
   let cx = 0, cy = 0, cz = 0;
   for (const nd of nodes) { cx += nd.x; cy += nd.y; cz += nd.z; }
@@ -78,6 +80,7 @@ export function prepareVectors(payload, now = Date.now()) {
     index.set(nd.id, i);
     if (!docIndex.has(nd.doc)) { docIndex.set(nd.doc, docs.length); docs.push(nd.doc); }
     docOf[i] = docIndex.get(nd.doc);
+    cluster[i] = Number.isInteger(nd.cluster) ? nd.cluster : -1;
   });
 
   const links = [];
@@ -87,7 +90,50 @@ export function prepareVectors(payload, now = Date.now()) {
   }
   links.sort((x, y) => y[2] - x[2]);
 
-  return { n, pos, bright, fresh, index, docs, docOf, links, nodes };
+  const clusters = payload?.clusters || [];
+  return { n, pos, bright, fresh, index, docs, docOf, cluster, clusters, links, nodes };
+}
+
+const STARS_PER_CONSTELLATION = 11;
+
+// constellationsOf picks up to 11 bright, spread-out members per cluster,
+// joins them with a minimum spanning tree and computes the label anchor:
+// the star centroid pushed outward by .55, lifted above its top star.
+export function constellationsOf(data) {
+  const out = [];
+  for (const c of data.clusters) {
+    const members = [];
+    for (let i = 0; i < data.n; i++) if (data.cluster[i] === c.id) members.push(i);
+    if (members.length < 3) continue;
+    members.sort((a, b) => data.bright[b] - data.bright[a] || a - b);
+    const pool = members.slice(0, Math.max(STARS_PER_CONSTELLATION, Math.ceil(members.length * 0.3)));
+    const step = pool.length / Math.min(STARS_PER_CONSTELLATION, pool.length);
+    const stars = [];
+    for (let k = 0; k * step < pool.length && stars.length < STARS_PER_CONSTELLATION; k++) stars.push(pool[Math.floor(k * step)]);
+
+    const p = (i) => [data.pos[i * 3], data.pos[i * 3 + 1], data.pos[i * 3 + 2]];
+    const d2 = (a, b) => { const [ax, ay, az] = p(a), [bx, by, bz] = p(b); return (ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2; };
+    const inTree = [stars[0]], rest = stars.slice(1), edges = [];
+    while (rest.length) {
+      let bi = 0, bj = 0, bd = Infinity;
+      for (const a of inTree) rest.forEach((b, j) => { const d = d2(a, b); if (d < bd) { bd = d; bi = a; bj = j; } });
+      const b = rest.splice(bj, 1)[0];
+      edges.push([bi, b]);
+      inTree.push(b);
+    }
+
+    let cx = 0, cy = 0, cz = 0, top = stars[0];
+    for (const i of stars) {
+      const [x, y, z] = p(i);
+      cx += x; cy += y; cz += z;
+      if (y > data.pos[top * 3 + 1]) top = i;
+    }
+    cx /= stars.length; cy /= stars.length; cz /= stars.length;
+    const len = Math.hypot(cx, cy, cz) || 1;
+    const anchor = [cx + (cx / len) * 0.55, Math.max(cy, data.pos[top * 3 + 1]) + 0.12, cz + (cz / len) * 0.55];
+    out.push({ cluster: c, stars, edges, anchor });
+  }
+  return out;
 }
 
 // ---------- WebGL scene ----------
@@ -304,7 +350,9 @@ function createWebGLScene(host) {
 
   // Soul state, rebuilt by setVectors.
   let data = prepareVectors(null);
-  let soul = null, filaments = null;
+  let soul = null, filaments = null, constellationLines = null, constellationStars = null;
+  let constellations = [];
+  const starMat = pointMaterial();
   let baseCol = new Float32Array(0), baseSize = new Float32Array(0);
   let highlight = new Set(), highlightColor = new THREE.Color('#ffffff');
   let view = 'sky', dimOverride = null;
@@ -340,7 +388,34 @@ function createWebGLScene(host) {
       color: C.filament, transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     scene.add(filaments);
+    buildConstellations();
     applyHighlight();
+  }
+
+  function buildConstellations() {
+    for (const o of [constellationLines, constellationStars]) {
+      if (o) { scene.remove(o); o.geometry.dispose(); }
+    }
+    if (constellationLines) constellationLines.material.dispose();
+    constellations = constellationsOf(data);
+    const seg = [], stars = [];
+    for (const c of constellations) {
+      for (const [a, b] of c.edges) seg.push(...data.pos.subarray(a * 3, a * 3 + 3), ...data.pos.subarray(b * 3, b * 3 + 3));
+      stars.push(...c.stars);
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+    constellationLines = new THREE.LineSegments(lg, lineMat(C.goldHi, 0.55));
+    scene.add(constellationLines);
+    const sg = pointGeometry(stars.length);
+    stars.forEach((i, k) => {
+      sg.attributes.position.array.set(data.pos.subarray(i * 3, i * 3 + 3), k * 3);
+      sg.attributes.color.array.set([1, 0.94, 0.8], k * 3);
+      sg.attributes.size.array[k] = 0.09;
+      sg.attributes.bright.array[k] = 1;
+    });
+    constellationStars = new THREE.Points(sg, starMat);
+    scene.add(constellationStars);
   }
 
   function currentDim() {
@@ -365,6 +440,7 @@ function createWebGLScene(host) {
     }
     g.attributes.color.needsUpdate = g.attributes.size.needsUpdate = g.attributes.bright.needsUpdate = true;
     if (filaments) filaments.material.opacity = 0.06 * (1 - dim * 0.7);
+    if (constellationLines) constellationLines.material.opacity = dim ? 0.18 : 0.55;
   }
 
   // ---------- sizing ----------
@@ -377,6 +453,7 @@ function createWebGLScene(host) {
     const scale = POINT_SCALE * h * pixelRatio;
     soulMat.uniforms.uScale.value = scale;
     shellMat.uniforms.uScale.value = scale;
+    starMat.uniforms.uScale.value = scale;
   }
   const ro = new ResizeObserver(resize);
   ro.observe(host);
@@ -389,6 +466,21 @@ function createWebGLScene(host) {
   const onMotionChange = (e) => { reducedMotion = e.matches; };
   motionQuery.addEventListener('change', onMotionChange);
   ctl.addEventListener('start', () => { lastInteraction = performance.now(); ctl.autoRotate = false; });
+
+  // project maps a scene point to CSS pixels in the host, plus whether it
+  // faces the camera (dot of its direction with the camera direction).
+  const pv = new THREE.Vector3(), camDir = new THREE.Vector3();
+  function project(x, y, z) {
+    pv.set(x, y, z).project(cam);
+    camDir.copy(cam.position).sub(ctl.target).normalize();
+    const len = Math.hypot(x, y, z) || 1;
+    return {
+      x: (pv.x * 0.5 + 0.5) * host.clientWidth,
+      y: (-pv.y * 0.5 + 0.5) * host.clientHeight,
+      facing: (x * camDir.x + y * camDir.y + z * camDir.z) / len,
+      behind: pv.z > 1,
+    };
+  }
 
   // ---------- render loop ----------
   const tgt = new THREE.Vector3();
@@ -414,6 +506,7 @@ function createWebGLScene(host) {
 
     soulMat.uniforms.uTime.value = t;
     shellMat.uniforms.uTime.value = t;
+    starMat.uniforms.uTime.value = t;
     if (!reducedMotion) {
       ringsAnim.eq.rotation.y = t * 0.04;
       ringsAnim.ecl.rotation.y = t * 0.06;
@@ -434,7 +527,7 @@ function createWebGLScene(host) {
     ctl.update(dt);
     composer.render(dt);
     if (sampleRequest) { sampleRequest(sampleCanvas(renderer)); sampleRequest = null; }
-    for (const fn of listeners) fn({ t, dt, camera: cam, target: ctl.target });
+    for (const fn of listeners) fn({ t, dt, view, camera: cam, target: ctl.target, project, ringAngle: reducedMotion ? 0 : t * 0.04 });
   }
 
   // Steps the pixel ratio down while the frame rate stays low, after a
@@ -489,6 +582,7 @@ function createWebGLScene(host) {
     get reducedMotion() { return reducedMotion; },
     get autoRotating() { return ctl.autoRotate; },
     get count() { return data.n; },
+    get constellations() { return constellations; },
     get distance() { return cam.position.distanceTo(ctl.target); },
     get azimuth() { return ctl.getAzimuthalAngle(); },
     // sample resolves with brightness stats of the next rendered frame (tests).
@@ -597,6 +691,7 @@ function createFallback(host) {
     get reducedMotion() { return true; },
     get autoRotating() { return false; },
     get count() { return data.n; },
+    get constellations() { return []; },
     get distance() { return VIEWS.sky.d; },
     get azimuth() { return 0; },
     sample() {

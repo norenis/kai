@@ -41,6 +41,16 @@ body {
 #gl { position: absolute; inset: 0; transform-origin: 100% 0; transition: transform .9s cubic-bezier(.2, .7, .2, 1), opacity .6s; }
 #gl canvas { display: block; width: 100%; height: 100%; }
 #labels { position: absolute; inset: 0; pointer-events: none; transition: opacity .4s; }
+#stage[data-s="sys"] #labels { opacity: 0; }
+
+/* Projected labels: positioned by transform each frame, anchored bottom-centre */
+.cl, .rn { position: absolute; left: 0; top: 0; white-space: nowrap; transition: opacity .4s; will-change: transform; }
+.cl { text-align: center; }
+.cl .in { transform: translate(-50%, -100%); }
+.cl .t { font: italic 500 19px var(--serif); color: #f3ead8; text-shadow: 0 0 12px rgba(0, 0, 0, .95); }
+.cl .sc { color: var(--gold); margin-top: 2px; }
+.rn .in { display: block; transform: translate(-50%, -50%); }
+.rn { font: 500 15px var(--serif); color: var(--gold); text-shadow: 0 0 8px rgba(0, 0, 0, .9); }
 
 /* Rail */
 .rail {

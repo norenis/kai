@@ -35,6 +35,7 @@ type vecNode struct {
 	Updated string  `json:"updated,omitempty"` // YYYY-MM-DD from front matter
 	Views   int     `json:"views"`             // read count of the note
 	Words   int     `json:"words"`             // word count of the note
+	Cluster int     `json:"cluster"`           // constellation id, -1 when unclustered
 }
 
 type vecLink struct {
@@ -62,12 +63,13 @@ func (s *Server) handleVectorsBuild(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	type response struct {
-		Nodes     []vecNode `json:"nodes"`
-		Links     []vecLink `json:"links"`
-		Provider  string    `json:"provider"`
-		Dims      int       `json:"dims"`
-		Notes     int       `json:"notes"`                // notes in the index, vault excluded
-		LastWrite string    `json:"last_write,omitempty"` // RFC 3339 time of the newest note change
+		Nodes     []vecNode       `json:"nodes"`
+		Links     []vecLink       `json:"links"`
+		Provider  string          `json:"provider"`
+		Dims      int             `json:"dims"`
+		Notes     int             `json:"notes"`                // notes in the index, vault excluded
+		LastWrite string          `json:"last_write,omitempty"` // RFC 3339 time of the newest note change
+		Clusters  []brain.Cluster `json:"clusters"`             // constellations, largest first
 	}
 
 	idx, _ := s.brain.LoadFullIndexCached()
@@ -75,8 +77,14 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 
 	vi, err := s.brain.LoadVecIndex()
 	if err != nil || vi == nil || len(vi.ChunkVecs) == 0 {
-		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite})
+		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite, Clusters: []brain.Cluster{}})
 		return
+	}
+
+	clusters := []brain.Cluster{}
+	var assign map[string]int
+	if cs, err := s.brain.Clusters(); err == nil && cs != nil {
+		clusters, assign = cs.Clusters, cs.Assign
 	}
 
 	entries := make([]vecEntry, 0, len(vi.ChunkVecs))
@@ -88,7 +96,7 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		entries = append(entries, vecEntry{key: k, vec: v})
 	}
 	if len(entries) == 0 {
-		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite})
+		writeJSON(w, response{Nodes: []vecNode{}, Links: []vecLink{}, Notes: notes, LastWrite: lastWrite, Clusters: clusters})
 		return
 	}
 	// Map iteration order is random; sort so node order is stable per index.
@@ -124,14 +132,18 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	for i, e := range entries {
 		doc := chunkKeyDoc(e.key)
 		nodes[i] = vecNode{
-			ID:    e.key,
-			X:     coords[i][0],
-			Y:     coords[i][1],
-			Z:     coords[i][2],
-			Doc:   doc,
-			Group: firstSegment(doc),
-			Label: chunkKeyLabel(e.key),
-			Title: brain.FilenameTitle(doc),
+			ID:      e.key,
+			X:       coords[i][0],
+			Y:       coords[i][1],
+			Z:       coords[i][2],
+			Doc:     doc,
+			Group:   firstSegment(doc),
+			Label:   chunkKeyLabel(e.key),
+			Title:   brain.FilenameTitle(doc),
+			Cluster: -1,
+		}
+		if c, ok := assign[e.key]; ok {
+			nodes[i].Cluster = c
 		}
 		if idx != nil {
 			if d, ok := idx.Documents[doc]; ok {
@@ -152,6 +164,7 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		Dims:      dims,
 		Notes:     notes,
 		LastWrite: lastWrite,
+		Clusters:  clusters,
 	})
 }
 

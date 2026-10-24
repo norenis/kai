@@ -46,3 +46,37 @@ test.describe('Sky identity', () => {
     expect(pts.bright).toEqual([0.98, 0.72, 0.42, 0.42]);
   });
 });
+
+test.describe('Sky constellations', () => {
+  test('labels the three largest constellations and orbits one numeral per cluster', async ({ page, request }) => {
+    const vectors = await (await request.get('/api/vectors')).json();
+    expect(vectors.clusters.length).toBeGreaterThanOrEqual(5);
+    await page.goto('/');
+    await page.waitForFunction(() => (window as any).fluctlight?.scene?.constellations?.length > 0);
+    await expect(page.locator('#identity .n')).toContainText(`${vectors.clusters.length} constellations`);
+    await expect(page.locator('#labels .rn')).toHaveCount(vectors.clusters.length);
+    await page.waitForTimeout(800); // labels fade in
+    const shown = await page.$$eval('#labels .cl', (els) =>
+      els.filter((e) => parseFloat(getComputedStyle(e).opacity) > 0.05).map((e) => Number((e as HTMLElement).dataset.cluster)).sort());
+    expect(shown).toEqual([0, 1, 2]);
+    const first = page.locator('#labels .cl[data-cluster="0"]');
+    await expect(first.locator('.sc')).toHaveText(`I · ${vectors.clusters[0].size} memories`);
+  });
+
+  test('labels hide outside the Sky', async ({ page }) => {
+    await page.goto('/#read');
+    await page.waitForFunction(() => (window as any).fluctlight?.scene?.constellations?.length > 0);
+    await page.waitForTimeout(800);
+    const visible = await page.$$eval('#labels .cl', (els) => els.filter((e) => parseFloat(getComputedStyle(e).opacity) > 0.05).length);
+    expect(visible).toBe(0);
+  });
+
+  test('constellation names are title-cased and joined with an ampersand', async ({ page }) => {
+    await page.goto('/');
+    const names = await page.evaluate(async () => {
+      const { constellationName } = await import('app/labels.js');
+      return [constellationName('go · testing'), constellationName('tasks'), constellationName('go (2)')];
+    });
+    expect(names).toEqual(['Go & Testing', 'Tasks', 'Go (2)']);
+  });
+});

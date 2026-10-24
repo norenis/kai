@@ -2,6 +2,7 @@
 // one persistent scene, plus data loading.
 
 import { createScene } from 'app/scene.js';
+import { mountLabels } from 'app/labels.js';
 
 const SCREENS = ['sky', 'read', 'sys'];
 
@@ -21,8 +22,9 @@ export async function api(path, init) {
 
 const scene = createScene(document.getElementById('gl'), { forceFallback: params.has('nogl') });
 stage.dataset.render = scene.kind;
+const labels = mountLabels(document.getElementById('labels'), scene);
 // Handle for e2e tests and performance measurements.
-window.fluctlight = { scene };
+window.fluctlight = { scene, get labels() { return labels; } };
 
 function screenFromHash() {
   const s = location.hash.slice(1);
@@ -114,6 +116,7 @@ async function loadVectors() {
   try {
     state.vectors = await api('api/vectors');
     scene.setVectors(state.vectors);
+    labels.rebuild();
     stage.dataset.memories = String(scene.count);
   } catch (err) {
     console.error('load vectors', err);
