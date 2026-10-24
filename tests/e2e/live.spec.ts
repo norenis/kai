@@ -56,7 +56,7 @@ test.describe('Live inflow', () => {
     await expect(page.locator('#labels .lock')).toContainText('locked · fragment');
     await expect(page.locator('#labels .lock')).toHaveCSS('opacity', '1');
     await target.click();
-    await expect(page).toHaveURL(/#read$/);
+    await expect(page).toHaveURL(/#read\/.+/);
     expect(await page.evaluate(() => (window as any).fluctlight.opened)).toBe(known);
   });
 

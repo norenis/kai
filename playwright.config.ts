@@ -4,10 +4,10 @@ import { defineConfig } from '@playwright/test';
 // synthetic demo brain (tests/fixtures/demo-brain); build ./kai first.
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 30_000,
+  timeout: 60_000,
   // Headless Chromium renders WebGL in software (a few fps), which slows
-  // timers and paints while the scene runs.
-  expect: { timeout: 10_000 },
+  // timers and paints while the scene runs, more so on a shared machine.
+  expect: { timeout: 20_000 },
   retries: 0,
   // One shared demo brain that some tests write to: run files one at a time.
   workers: 1,

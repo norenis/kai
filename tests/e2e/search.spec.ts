@@ -37,7 +37,7 @@ test.describe('⌘K search sheet', () => {
     const path = await rows.nth(1).getAttribute('data-path');
     await page.keyboard.press('Enter');
     await expect(page.locator('#sheet')).toBeHidden();
-    await expect(page).toHaveURL(/#read$/);
+    await expect(page).toHaveURL(/#read\/.+/);
     expect(await page.evaluate(() => (window as any).fluctlight.opened)).toBe(path);
 
     await page.goto('/#sky');

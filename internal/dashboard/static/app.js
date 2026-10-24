@@ -5,9 +5,11 @@ import { createScene } from 'app/scene.js';
 import { mountLabels, constellationName } from 'app/labels.js';
 import { mountInflow, connectEvents, relativeTime } from 'app/inflow.js';
 import { mountSearch } from 'app/cmdk.js';
+import { mountReader, noteClusters } from 'app/reader.js';
 
 const SCREENS = ['sky', 'read', 'sys'];
 let search = null; // the ⌘K sheet, mounted below
+let reader = null; // the Read drawer, mounted below
 
 const stage = document.getElementById('stage');
 const params = new URLSearchParams(location.search);
@@ -29,20 +31,33 @@ const labels = mountLabels(document.getElementById('labels'), scene);
 // Handle for e2e tests and performance measurements.
 window.fluctlight = { scene, get labels() { return labels; } };
 
-function screenFromHash() {
-  const s = location.hash.slice(1);
-  return SCREENS.includes(s) ? s : 'sky';
+// Routes: #sky, #read (note list), #read/<path> (a note), #sys.
+function route() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  const [screen, ...rest] = h.split('/');
+  return { screen: SCREENS.includes(screen) ? screen : 'sky', path: rest.join('/') };
 }
+const screenFromHash = () => route().screen;
 
-function go(screen) {
+function go() {
+  const { screen, path } = route();
   stage.dataset.s = screen;
+  const drawer = document.getElementById('drawer');
+  drawer.hidden = screen !== 'read';
+  if (screen === 'read' && reader) {
+    if (path && reader.showNote) reader.showNote(path);
+    else reader.showList();
+  } else {
+    reader?.leave();
+  }
   document.querySelectorAll('.rail .ri').forEach((el) => {
     const on = el.dataset.r === screen;
     el.classList.toggle('on', on);
     if (on) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   });
-  scene.setView(search?.open ? search.mode : screen);
+  const view = screen === 'read' && path && reader?.showNote ? 'note' : screen;
+  scene.setView(search?.open ? search.mode : view);
 }
 
 // Bottom-right readout: right ascension follows the rotating equator.
@@ -120,9 +135,11 @@ async function loadVectors() {
   try {
     state.vectors = await api('api/vectors');
     for (const n of state.vectors.nodes) state.titles.set(n.doc, n.title);
+    state.clusters = noteClusters(state.vectors.nodes);
     scene.setVectors(state.vectors);
     labels.rebuild();
     stage.dataset.memories = String(scene.count);
+    if (route().screen === 'read') go(); // numerals and highlights follow the new vectors
   } catch (err) {
     console.error('load vectors', err);
   }
@@ -151,11 +168,12 @@ function lockPath(path) {
   lockOn(id || null);
 }
 
-// openNote opens a note in Read (the note view arrives in Task 12).
+// openNote opens a note in Read.
 function openNote(path) {
+  if (!path) return;
   state.openPath = path;
   window.fluctlight.opened = path;
-  location.hash = '#read';
+  location.hash = `#read/${encodeURIComponent(path)}`;
 }
 
 // Hovering a memory locks it; clicking (not dragging) opens its note.
@@ -210,6 +228,7 @@ function onWrite(ev, live) {
     state.vectors.last_write = ev.ts;
     renderIdentity();
   }
+  reader?.markStale();
   if (!live) return;
   const unknown = (ev.chunks || []).filter((id) => !scene.has(id));
   if (ev.type !== 'delete') state.waitingFor = [...new Set([...(state.waitingFor || []), ...unknown])];
@@ -242,10 +261,31 @@ search = mountSearch(document.getElementById('sheet'), {
   },
 });
 window.fluctlight.search = search;
+
+// ---------- Read drawer ----------
+
+reader = mountReader(document.getElementById('drawer'), {
+  api,
+  scene,
+  data: () => ({ vectors: state.vectors, clusterOf: (p) => state.clusters?.get(p) ?? -1 }),
+  onClose: () => { location.hash = '#sky'; },
+  onOpen: openNote,
+});
+window.fluctlight.reader = reader;
+
+// esc leaves a note for the list, and the list for the Sky (unless the
+// sheet or a field has the key).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || search?.open || e.defaultPrevented) return;
+  const { screen, path } = route();
+  if (screen !== 'read') return;
+  if (e.target.matches?.('input') && e.target.value) return; // clear the filter first
+  location.hash = path ? '#read' : '#sky';
+});
 document.getElementById('query').addEventListener('click', () => search.show());
 
-addEventListener('hashchange', () => go(screenFromHash()));
-go(screenFromHash());
+addEventListener('hashchange', go);
+go();
 mountFoot();
 if (params.has('fps')) mountFps();
 mountPicking();

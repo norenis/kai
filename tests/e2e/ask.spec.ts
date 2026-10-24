@@ -124,6 +124,6 @@ test('⌘↵ streams a cited answer with sources, trace and follow-ups', async (
   // A source opens its note.
   const path = await sheet.locator('.turn.last .src span').first().getAttribute('data-path');
   await sheet.locator('.turn.last .src span').first().click();
-  await expect(page).toHaveURL(/#read$/);
+  await expect(page).toHaveURL(/#read\/.+/);
   expect(await page.evaluate(() => (window as any).fluctlight.opened)).toBe(path);
 });

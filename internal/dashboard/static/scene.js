@@ -331,6 +331,7 @@ function createWebGLScene(host) {
   const starMat = pointMaterial();
   let baseCol = new Float32Array(0), baseSize = new Float32Array(0);
   let highlight = new Set(), highlightColor = new THREE.Color('#ffffff');
+  let secondary = new Set(); // e.g. related notes: champagne, a little larger
   let view = 'sky', dimOverride = null;
 
   // Per-chunk event effects (see flows.js) on top of the highlight state.
@@ -363,6 +364,8 @@ function createWebGLScene(host) {
     fxActive = false;
     flows.reset();
     locked = -1;
+    highlight = new Set(); // indices of the previous data are meaningless now
+    secondary = new Set();
     baseCol = new Float32Array(n * 3);
     baseSize = new Float32Array(n);
     // The look was tuned on a ~3k chunk brain; small brains get larger points
@@ -424,12 +427,16 @@ function createWebGLScene(host) {
     if (!soul) return;
     const g = soul.geometry;
     const ca = g.attributes.color.array, sa = g.attributes.size.array, ba = g.attributes.bright.array;
-    const dim = highlight.size ? currentDim() : 0;
+    const dim = highlight.size || secondary.size ? currentDim() : 0;
     for (let i = 0; i < data.n; i++) {
       if (highlight.has(i)) {
         ca[i * 3] = highlightColor.r; ca[i * 3 + 1] = highlightColor.g; ca[i * 3 + 2] = highlightColor.b;
         sa[i] = baseSize[i] * 2.1;
         ba[i] = 1.6;
+      } else if (secondary.has(i)) {
+        ca[i * 3] = COL.champagne.r; ca[i * 3 + 1] = COL.champagne.g; ca[i * 3 + 2] = COL.champagne.b;
+        sa[i] = baseSize[i] * 1.4;
+        ba[i] = 1.1;
       } else {
         ca[i * 3] = baseCol[i * 3]; ca[i * 3 + 1] = baseCol[i * 3 + 1]; ca[i * 3 + 2] = baseCol[i * 3 + 2];
         sa[i] = baseSize[i];
@@ -644,10 +651,13 @@ function createWebGLScene(host) {
       view = name;
       applyHighlight();
     },
-    // highlight(chunkIds, {color, dim}) lights the given chunks and dims the rest.
-    highlight(ids = [], { color = '#ffffff', dim = null } = {}) {
+    // highlight(chunkIds, {color, dim, secondary}) lights the given chunks
+    // (and, in champagne, the secondary ones) and dims the rest.
+    highlight(ids = [], { color = '#ffffff', dim = null, secondary: second = [] } = {}) {
       highlight = new Set();
+      secondary = new Set();
       for (const id of ids) { const i = data.index.get(id); if (i !== undefined) highlight.add(i); }
+      for (const id of second) { const i = data.index.get(id); if (i !== undefined && !highlight.has(i)) secondary.add(i); }
       highlightColor = new THREE.Color(color);
       dimOverride = dim;
       applyHighlight();
@@ -705,6 +715,8 @@ function createWebGLScene(host) {
     get fps() { return fps; },
     get pixelRatio() { return pixelRatio; },
     get view() { return view; },
+    get highlighted() { return highlight.size; },
+    get secondaryHighlighted() { return secondary.size; },
     // worstFrameMs returns the longest frame since the last call (perf checks).
     worstFrameMs() { const w = worstFrame; worstFrame = 0; return w * 1000; },
     get reducedMotion() { return reducedMotion; },
@@ -826,6 +838,8 @@ function createFallback(host) {
     fadeOf(id) { return data.index.has(id) ? 1 : null; },
     get flowsActive() { return 0; },
     get view() { return 'sky'; },
+    get highlighted() { return 0; },
+    get secondaryHighlighted() { return 0; },
     onFrame(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get running() { return false; },
     get fps() { return 0; },
