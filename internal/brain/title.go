@@ -2,11 +2,14 @@ package brain
 
 import (
 	"path"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 )
+
+var datedName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // VaultCategory is the reserved, PIN-gated brain category. Its notes must not
 // appear in lists, search results or visualisations.
@@ -43,8 +46,12 @@ func Title(p, content string) string {
 }
 
 // FilenameTitle turns "knowledge/usb-c_power-notes.md" into "Usb c power notes".
+// Dated names such as daily task files ("2026-10-24") stay as they are.
 func FilenameTitle(p string) string {
 	name := strings.TrimSuffix(path.Base(p), ".md")
+	if datedName.MatchString(name) {
+		return name
+	}
 	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' }), " ")
 	if name == "" {
 		return p

@@ -68,7 +68,7 @@ func TestBrainPublishesWrites(t *testing.T) {
 		t.Fatalf("got %d events: %+v", len(got), got)
 	}
 	for i, w := range want {
-		if got[i].Type != w.typ || got[i].Path != w.path || got[i].Source != w.source {
+		if got[i].Type != w.typ || got[i].Path != w.path || got[i].Source != w.source || got[i].Title == "" {
 			t.Errorf("event %d = %s %s %s, want %+v", i, got[i].Type, got[i].Path, got[i].Source, w)
 		}
 	}

@@ -27,8 +27,10 @@ test.describe('Fluctlight Hub shell', () => {
     page.on('requestfailed', (req) => failed.push(req.url()));
     page.on('response', (res) => { if (res.status() >= 400) failed.push(`${res.status()} ${res.url()}`); });
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    // The event stream never goes idle; wait for the scene and fonts instead.
+    await page.waitForFunction(() => (window as any).fluctlight?.scene?.count > 0);
     await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(1000);
     expect(external).toEqual([]);
     expect(failed).toEqual([]);
   });

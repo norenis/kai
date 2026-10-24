@@ -32,6 +32,7 @@ type Event struct {
 	ID     uint64    `json:"id"` // increasing per bus; used for SSE replay
 	Type   string    `json:"type"`
 	Path   string    `json:"path,omitempty"`
+	Title  string    `json:"title,omitempty"`  // note title, when known
 	Chunks []string  `json:"chunks,omitempty"` // chunk ids "path#n"
 	Query  string    `json:"query,omitempty"`
 	Trace  *Trace    `json:"trace,omitempty"` // search/ask only

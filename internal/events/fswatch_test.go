@@ -42,8 +42,8 @@ func startWatch(t *testing.T, opt WatchOptions) (string, *Bus, func(time.Duratio
 }
 
 func TestWatchReportsExternalChanges(t *testing.T) {
-	dir, _, collect := startWatch(t, WatchOptions{Chunks: func(p string, deleted bool) []string {
-		return []string{fmt.Sprintf("%s#0", p)}
+	dir, _, collect := startWatch(t, WatchOptions{Describe: func(p string, deleted bool) (string, []string) {
+		return "T", []string{fmt.Sprintf("%s#0", p)}
 	}})
 	note := filepath.Join(dir, "knowledge", "new.md")
 
@@ -51,7 +51,7 @@ func TestWatchReportsExternalChanges(t *testing.T) {
 	os.WriteFile(note+".tmp", []byte("hello"), 0o644)
 	os.Rename(note+".tmp", note)
 	got := collect(600 * time.Millisecond)
-	if len(got) != 1 || got[0].Type != Create || got[0].Path != "knowledge/new.md" || got[0].Source != SourceFS || len(got[0].Chunks) != 1 {
+	if len(got) != 1 || got[0].Type != Create || got[0].Path != "knowledge/new.md" || got[0].Source != SourceFS || len(got[0].Chunks) != 1 || got[0].Title != "T" {
 		t.Fatalf("create: %+v", got)
 	}
 

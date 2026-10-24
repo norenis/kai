@@ -18,9 +18,9 @@ type WatchOptions struct {
 	Debounce time.Duration // quiet time per path before reporting (250 ms)
 	Dedupe   time.Duration // skip paths this process published within (2 s)
 	MaxRate  int           // events per second at most (20)
-	// Chunks returns a note's chunk ids; deleted notes are looked up in the
-	// index since the file is gone. Optional.
-	Chunks func(path string, deleted bool) []string
+	// Describe returns a note's title and chunk ids; deleted notes are looked
+	// up in the index since the file is gone. Optional.
+	Describe func(path string, deleted bool) (title string, chunks []string)
 	// Skip reports paths that must never be announced (e.g. the vault). Optional.
 	Skip func(path string) bool
 }
@@ -205,11 +205,12 @@ func (w *Watcher) flush(rel string) {
 	if !w.allow() {
 		return
 	}
+	var title string
 	var chunks []string
-	if w.opt.Chunks != nil {
-		chunks = w.opt.Chunks(rel, typ == Delete)
+	if w.opt.Describe != nil {
+		title, chunks = w.opt.Describe(rel, typ == Delete)
 	}
-	w.bus.Publish(Event{Type: typ, Path: rel, Chunks: chunks, Source: SourceFS})
+	w.bus.Publish(Event{Type: typ, Path: rel, Title: title, Chunks: chunks, Source: SourceFS})
 }
 
 // allow caps reports at MaxRate within any one-second window, so bulk

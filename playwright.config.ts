@@ -6,6 +6,8 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
   retries: 0,
+  // One shared demo brain that some tests write to: run files one at a time.
+  workers: 1,
   use: {
     baseURL: 'http://localhost:9234',
     headless: true,

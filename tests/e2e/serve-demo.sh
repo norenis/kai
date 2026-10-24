@@ -6,6 +6,8 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PORT=${KAI_E2E_PORT:-9234}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kai-e2e-XXXXXX")
 trap 'rm -rf "$WORK"' EXIT INT TERM
+# Tests that act as another process (CLI, editor) find the brain here.
+echo "$WORK" > "${TMPDIR:-/tmp}/kai-e2e-$PORT.dir"
 
 cp -R "$ROOT/tests/fixtures/demo-brain" "$WORK/brain"
 cat > "$WORK/config.yaml" <<YAML

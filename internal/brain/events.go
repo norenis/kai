@@ -51,7 +51,7 @@ func (b *FileBrain) emit(typ string, bf *BrainFile, source string) {
 	if source == "" {
 		source = b.eventSource
 	}
-	b.events.Publish(events.Event{Type: typ, Path: bf.Path, Chunks: chunkIDs(bf.Path, bf.Content), Source: source})
+	b.events.Publish(events.Event{Type: typ, Path: bf.Path, Title: Title(bf.Path, bf.Content), Chunks: chunkIDs(bf.Path, bf.Content), Source: source})
 }
 
 // emitDelete announces a removed note, with the chunk ids it had in the index.
@@ -60,13 +60,8 @@ func (b *FileBrain) emitDelete(path string) {
 	if b.events == nil || IsVaultPath(path) {
 		return
 	}
-	var chunks []string
-	if idx, err := b.loadFullIndexCached(); err == nil && idx != nil {
-		for i := 0; i < idx.Documents[path].ChunkCount; i++ {
-			chunks = append(chunks, fmt.Sprintf("%s#%d", path, i))
-		}
-	}
-	b.events.Publish(events.Event{Type: events.Delete, Path: path, Chunks: chunks, Source: b.eventSource})
+	title, chunks := b.indexedNote(path)
+	b.events.Publish(events.Event{Type: events.Delete, Path: path, Title: title, Chunks: chunks, Source: b.eventSource})
 }
 
 // exists reports whether a note is already on disk. Caller holds mu.
@@ -87,32 +82,41 @@ func (b *FileBrain) WatchDisk(ctx context.Context) error {
 		return nil
 	}
 	_, err := events.Watch(ctx, b.root, bus, events.WatchOptions{
-		Chunks: b.chunkIDsFor,
-		Skip:   IsVaultPath,
+		Describe: b.describe,
+		Skip:     IsVaultPath,
 	})
 	return err
 }
 
-// chunkIDsFor returns a note's chunk ids from disk, or from the index when
-// the note was deleted.
-func (b *FileBrain) chunkIDsFor(path string, deleted bool) []string {
+// describe returns a note's title and chunk ids from disk, or from the
+// index when the note was deleted.
+func (b *FileBrain) describe(path string, deleted bool) (string, []string) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if deleted {
-		idx, err := b.loadFullIndexCached()
-		if err != nil || idx == nil {
-			return nil
-		}
-		n := idx.Documents[path].ChunkCount
-		ids := make([]string, n)
-		for i := range ids {
-			ids[i] = fmt.Sprintf("%s#%d", path, i)
-		}
-		return ids
+		return b.indexedNote(path)
 	}
 	bf, err := b.load(path)
 	if err != nil {
-		return nil
+		return FilenameTitle(path), nil
 	}
-	return chunkIDs(path, bf.Content)
+	return Title(path, bf.Content), chunkIDs(path, bf.Content)
+}
+
+// indexedNote returns the title and chunk ids the index holds for a note.
+// Caller holds mu.
+func (b *FileBrain) indexedNote(path string) (string, []string) {
+	idx, err := b.loadFullIndexCached()
+	if err != nil || idx == nil {
+		return FilenameTitle(path), nil
+	}
+	d := idx.Documents[path]
+	ids := make([]string, d.ChunkCount)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%s#%d", path, i)
+	}
+	if d.Path == "" {
+		return FilenameTitle(path), ids
+	}
+	return d.DisplayTitle(), ids
 }

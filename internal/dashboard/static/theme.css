@@ -96,6 +96,18 @@ body {
 .q kbd { margin-left: auto; font: 400 9px var(--sans); letter-spacing: .2em; color: var(--gold); border: 1px solid var(--gold-3); padding: 4px 8px; }
 #stage[data-s="read"] .q { left: calc(var(--rail) + (100vw - var(--rail) - 560px) / 2); width: 420px; }
 .fps { position: absolute; left: calc(var(--rail) + 16px); bottom: 12px; z-index: 9; color: var(--gold); }
+.inf .ev { margin-top: 12px; cursor: pointer; }
+.inf .ev .t { font: italic 500 17px var(--serif); color: #efe7d6; transition: color .3s; }
+.inf .ev:hover .t, .inf .ev:focus-visible .t { color: #fff; }
+.inf .ev:focus-visible { outline: none; }
+.inf .ev .sc { margin-top: 3px; }
+.inf .ev.new .t { animation: inflow-glow 1.4s ease-out; }
+@keyframes inflow-glow { from { color: #fff; text-shadow: 0 0 14px rgba(243, 223, 174, .9); } }
+
+/* Lock callout beside the focused memory */
+.lock { position: absolute; left: 0; top: 0; width: 250px; text-align: right; transition: opacity .3s; opacity: 0; }
+.lock .t { font: italic 500 17px var(--serif); color: #f6efe0; margin-top: 3px; }
+#gl.picking { cursor: pointer; }
 #stage:not([data-s="sky"]) .inf,
 #stage:not([data-s="sky"]) .foot { display: none; }
 #stage[data-s="sys"] .id,

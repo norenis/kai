@@ -145,7 +145,7 @@ func TestFilesAndFileCarryTitles(t *testing.T) {
 	if got := titles["knowledge/nau-pho-bo-tai-nha.md"]; got != "Nấu phở bò tại nhà" {
 		t.Errorf("files title = %q", got)
 	}
-	if got := titles["tasks/2026-10-23.md"]; got != "2026 10 23" {
+	if got := titles["tasks/2026-10-23.md"]; got != "2026-10-23" {
 		t.Errorf("task file title = %q", got)
 	}
 

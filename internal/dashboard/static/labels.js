@@ -18,11 +18,15 @@ export function constellationName(label) {
 
 export function mountLabels(layer, scene) {
   let labels = [], numerals = [];
+  // Callout beside the locked memory: {id, html} or null.
+  let lock = null;
+  const lockEl = document.createElement('div');
+  lockEl.className = 'lock';
   // Clusters whose labels show on search/ask screens (set from Task 9 on).
   let hitClusters = new Set();
 
   function rebuild() {
-    layer.replaceChildren();
+    layer.replaceChildren(lockEl);
     labels = scene.constellations.map((c) => {
       const el = document.createElement('div');
       el.className = 'cl';
@@ -54,6 +58,15 @@ export function mountLabels(layer, scene) {
       const visible = view === 'sky' ? id < SKY_LABELS : (view === 'search' || view === 'ask') ? hitClusters.has(id) : false;
       place(l.el, p.x, p.y, visible && !p.behind ? (p.facing > -0.35 ? 1 : 0.3) : 0);
     }
+    const pos = lock && (view === 'sky' || view === 'note') ? scene.position(lock.id) : null;
+    if (pos) {
+      const p = project(...pos);
+      // Right-aligned block left of and below the ring, as in the mock.
+      place(lockEl, p.x - 280, p.y + 26, p.behind ? 0 : 1);
+    } else {
+      lockEl.style.opacity = 0;
+    }
+
     const showNumerals = view === 'sky' || view === 'read' || view === 'note';
     for (const n of numerals) {
       const a = n.angle + ringAngle;
@@ -64,6 +77,11 @@ export function mountLabels(layer, scene) {
 
   return {
     rebuild,
+    // setLock shows a callout ({id, html}) beside a memory, or hides it (null).
+    setLock(next) {
+      lock = next;
+      if (next) lockEl.innerHTML = next.html;
+    },
     setHitClusters(ids) { hitClusters = new Set(ids); },
   };
 }

@@ -15,7 +15,7 @@ func TestTitle(t *testing.T) {
 		{"unterminated front matter", "style/naming.md", "---\ntags: [x]\n# not a heading\n", "Naming"},
 		{"heading in code fence", "knowledge/md.md", "```md\n# fenced\n```\n# Real title\n", "Real title"},
 		{"empty heading", "knowledge/empty-title.md", "# \n#\n", "Empty title"},
-		{"date filename", "tasks/2026-10-19.md", "- [ ] item\n", "2026 10 19"},
+		{"date filename", "tasks/2026-10-19.md", "- [ ] item\n", "2026-10-19"},
 		{"accented filename", "knowledge/éte.md", "", "Éte"},
 	}
 	for _, c := range cases {

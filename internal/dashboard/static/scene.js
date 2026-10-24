@@ -8,6 +8,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { pointMaterial, pointGeometry } from 'app/points.js';
+import { createFlows } from 'app/flows.js';
 
 // Camera per screen (spec 5.3). dim = how much non-highlighted memories fade.
 export const VIEWS = {
@@ -34,6 +36,7 @@ const DAY_MS = 864e5;
 
 const C = {
   gold: '#d8bc84',
+  coral: '#ff6f5c',
   goldHi: '#e6c98e',
   champagne: '#f3dfae',
   soul: '#6fe3f5',
@@ -137,33 +140,6 @@ export function constellationsOf(data) {
 }
 
 // ---------- WebGL scene ----------
-
-const VS = `attribute float size;attribute float bright;attribute float phase;attribute vec3 color;
-uniform float uScale;uniform float uTime;uniform float uTwinkle;varying vec3 vC;varying float vA;
-void main(){vC=color;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=size*uScale/(-mv.z);
-gl_Position=projectionMatrix*mv;vA=bright*(1.-.28*uTwinkle+.28*uTwinkle*sin(uTime*1.6+phase));}`;
-const FS = `varying vec3 vC;varying float vA;void main(){float d=length(gl_PointCoord-.5);
-float a=smoothstep(.5,0.,d);a=pow(a,1.7);if(a<.01)discard;gl_FragColor=vec4(vC,a*vA);}`;
-
-function pointMaterial() {
-  return new THREE.ShaderMaterial({
-    uniforms: { uScale: { value: 200 }, uTime: { value: 0 }, uTwinkle: { value: 1 } },
-    vertexShader: VS, fragmentShader: FS,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-  });
-}
-
-function pointGeometry(n) {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-  g.setAttribute('size', new THREE.BufferAttribute(new Float32Array(n), 1));
-  g.setAttribute('bright', new THREE.BufferAttribute(new Float32Array(n), 1));
-  const ph = new Float32Array(n);
-  for (let i = 0; i < n; i++) ph[i] = Math.random() * Math.PI * 2;
-  g.setAttribute('phase', new THREE.BufferAttribute(ph, 1));
-  return g;
-}
 
 const lineMat = (c, o) => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false });
 
@@ -357,6 +333,21 @@ function createWebGLScene(host) {
   let highlight = new Set(), highlightColor = new THREE.Color('#ffffff');
   let view = 'sky', dimOverride = null;
 
+  // Per-chunk event effects (see flows.js) on top of the highlight state.
+  let lit = new Float32Array(0); // brightness from applyHighlight
+  const fx = { boost: new Float32Array(0), fade: new Float32Array(0), dirty: false };
+  let fxActive = false;
+  const flows = createFlows({ scene3: scene, getData: () => data, fx });
+
+  // Coral lock ring around one focused memory.
+  const lockRing = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.078, 48), new THREE.MeshBasicMaterial({
+    color: C.coral, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false,
+  }));
+  lockRing.material.opacity = 0; // kept in the scene so its shader compiles up front
+  lockRing.renderOrder = 10;
+  scene.add(lockRing);
+  let locked = -1;
+
   function setVectors(payload) {
     data = prepareVectors(payload);
     if (soul) { scene.remove(soul); soul.geometry.dispose(); }
@@ -365,6 +356,13 @@ function createWebGLScene(host) {
     const n = data.n;
     const g = pointGeometry(n);
     g.attributes.position.array.set(data.pos);
+    lit = new Float32Array(n);
+    fx.boost = new Float32Array(n);
+    fx.fade = new Float32Array(n).fill(1);
+    fx.dirty = false;
+    fxActive = false;
+    flows.reset();
+    locked = -1;
     baseCol = new Float32Array(n * 3);
     baseSize = new Float32Array(n);
     // The look was tuned on a ~3k chunk brain; small brains get larger points
@@ -437,7 +435,9 @@ function createWebGLScene(host) {
         sa[i] = baseSize[i];
         ba[i] = data.bright[i] * (1 - dim);
       }
+      lit[i] = ba[i];
     }
+    fxActive = true; // re-apply effects on top of the new base
     g.attributes.color.needsUpdate = g.attributes.size.needsUpdate = g.attributes.bright.needsUpdate = true;
     if (filaments) filaments.material.opacity = 0.06 * (1 - dim * 0.7);
     if (constellationLines) constellationLines.material.opacity = dim ? 0.18 : 0.55;
@@ -454,6 +454,7 @@ function createWebGLScene(host) {
     soulMat.uniforms.uScale.value = scale;
     shellMat.uniforms.uScale.value = scale;
     starMat.uniforms.uScale.value = scale;
+    flows.setScale(scale);
   }
   const ro = new ResizeObserver(resize);
   ro.observe(host);
@@ -487,17 +488,19 @@ function createWebGLScene(host) {
   const off = new THREE.Vector3();
   let dist = VIEWS.sky.d;
   let t = 0, last = performance.now(), raf = 0, running = false;
-  let frames = 0, fpsWindowStart = last, fps = 0;
+  let frames = 0, fpsWindowStart = last, fps = 0, worstFrame = 0;
   const listeners = new Set();
   let sampleRequest = null;
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, (now - last) / 1000);
+    const raw = (now - last) / 1000;
+    const dt = Math.min(0.1, raw);
     last = now;
     t += dt;
 
     frames++;
+    if (raw > worstFrame) worstFrame = raw;
     if (now - fpsWindowStart >= 1000) {
       fps = (frames * 1000) / (now - fpsWindowStart);
       frames = 0; fpsWindowStart = now;
@@ -524,10 +527,65 @@ function createWebGLScene(host) {
     off.copy(cam.position).sub(ctl.target).setLength(dist);
     cam.position.copy(ctl.target).add(off);
 
+    flows.update(dt, cam);
+    applyEffects(dt);
+    updateLock(t);
+
     ctl.update(dt);
     composer.render(dt);
     if (sampleRequest) { sampleRequest(sampleCanvas(renderer)); sampleRequest = null; }
     for (const fn of listeners) fn({ t, dt, view, camera: cam, target: ctl.target, project, ringAngle: reducedMotion ? 0 : t * 0.04 });
+  }
+
+  // applyEffects writes boost (glow) and fade (deleted notes drifting out as
+  // dust) into the soul's attributes. Idle frames cost nothing.
+  function applyEffects(dt) {
+    if (!soul) return;
+    const n = data.n, boost = fx.boost, fade = fx.fade;
+    let glowing = false;
+    for (let i = 0; i < n; i++) if (boost[i] > 0.005) { glowing = true; break; }
+    if (!glowing && !fx.dirty && !fxActive) return;
+    const decay = flows.decay(dt);
+    const g = soul.geometry, ba = g.attributes.bright.array, pa = g.attributes.position.array;
+    let moved = false;
+    for (let i = 0; i < n; i++) {
+      ba[i] = lit[i] * fade[i] + boost[i];
+      boost[i] = boost[i] > 0.005 ? boost[i] * decay : 0;
+      if (fade[i] < 1) {
+        const out = 1 + 0.6 * (1 - fade[i]);
+        pa[i * 3] = data.pos[i * 3] * out; pa[i * 3 + 1] = data.pos[i * 3 + 1] * out; pa[i * 3 + 2] = data.pos[i * 3 + 2] * out;
+        moved = true;
+      }
+    }
+    g.attributes.bright.needsUpdate = true;
+    if (moved) g.attributes.position.needsUpdate = true;
+    fx.dirty = false;
+    fxActive = glowing;
+  }
+
+  function updateLock(time) {
+    const show = locked >= 0 && locked < data.n && (view === 'sky' || view === 'note') && fx.fade[locked] > 0.5;
+    lockRing.material.opacity = show ? 0.95 : 0;
+    if (!show) return;
+    lockRing.position.set(data.pos[locked * 3], data.pos[locked * 3 + 1], data.pos[locked * 3 + 2]);
+    lockRing.lookAt(cam.position);
+    lockRing.scale.setScalar(reducedMotion ? 1 : 1 + 0.12 * Math.sin(time * 3));
+  }
+
+  // pick returns the memory nearest to a host-relative pixel, within a few pixels.
+  function pick(px, py, radius = 10) {
+    if (!soul) return -1;
+    let best = -1, bestD = radius * radius;
+    const w = host.clientWidth, h = host.clientHeight;
+    for (let i = 0; i < data.n; i++) {
+      if (fx.fade[i] < 0.5) continue;
+      pv.set(data.pos[i * 3], data.pos[i * 3 + 1], data.pos[i * 3 + 2]).project(cam);
+      if (pv.z > 1) continue;
+      const dx = (pv.x * 0.5 + 0.5) * w - px, dy = (-pv.y * 0.5 + 0.5) * h - py;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 
   // Steps the pixel ratio down while the frame rate stays low, after a
@@ -574,11 +632,46 @@ function createWebGLScene(host) {
       dimOverride = dim;
       applyHighlight();
     },
+    // onEvent plays a brain event's effect; returns the target chunk id or null.
+    onEvent(ev, { onArrive = null } = {}) {
+      const i = flows.spawn(ev, { reduced: reducedMotion, onArrive });
+      return i >= 0 ? data.nodes[i].id : null;
+    },
+    // lock puts the coral ring on a chunk (null releases it).
+    lock(id) {
+      const i = id == null ? -1 : data.index.get(id);
+      locked = i === undefined ? -1 : i;
+    },
+    get locked() { return locked >= 0 ? data.nodes[locked].id : null; },
+    // pickAt returns the chunk id under a host-relative pixel, or null.
+    pickAt(x, y) {
+      const i = pick(x, y);
+      return i >= 0 ? data.nodes[i].id : null;
+    },
+    node(id) { const i = data.index.get(id); return i === undefined ? null : data.nodes[i]; },
+    position(id) {
+      const i = data.index.get(id);
+      return i === undefined ? null : [data.pos[i * 3], data.pos[i * 3 + 1], data.pos[i * 3 + 2]];
+    },
+    // chunksOf lists a note's chunk ids in index order.
+    chunksOf(doc) {
+      const d = data.docs.indexOf(doc);
+      if (d < 0) return [];
+      const ids = [];
+      for (let i = 0; i < data.n; i++) if (data.docOf[i] === d) ids.push(data.nodes[i].id);
+      return ids.sort((a, b) => Number(a.split('#').pop()) - Number(b.split('#').pop()));
+    },
+    has(id) { return data.index.has(id); },
+    // fadeOf is 1 for a visible memory and 0 once its note is deleted.
+    fadeOf(id) { const i = data.index.get(id); return i === undefined ? null : fx.fade[i]; },
+    get flowsActive() { return flows.active; },
     // onFrame registers a per-frame callback (overlays, readouts); returns an unsubscribe function.
     onFrame(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get running() { return running; },
     get fps() { return fps; },
     get pixelRatio() { return pixelRatio; },
+    // worstFrameMs returns the longest frame since the last call (perf checks).
+    worstFrameMs() { const w = worstFrame; worstFrame = 0; return w * 1000; },
     get reducedMotion() { return reducedMotion; },
     get autoRotating() { return ctl.autoRotate; },
     get count() { return data.n; },
@@ -685,6 +778,16 @@ function createFallback(host) {
     setVectors(payload) { data = prepareVectors(payload); draw(); },
     setView() {},
     highlight() {},
+    onEvent(ev, { onArrive = null } = {}) { onArrive?.(); return null; },
+    lock() {},
+    get locked() { return null; },
+    pickAt() { return null; },
+    node(id) { const i = data.index.get(id); return i === undefined ? null : data.nodes[i]; },
+    position() { return null; },
+    chunksOf(doc) { return data.nodes.filter((n) => n.doc === doc).map((n) => n.id); },
+    has(id) { return data.index.has(id); },
+    fadeOf(id) { return data.index.has(id) ? 1 : null; },
+    get flowsActive() { return 0; },
     onFrame(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get running() { return false; },
     get fps() { return 0; },
