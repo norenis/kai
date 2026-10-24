@@ -40,6 +40,10 @@ func newReindexCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("rebuild index failed: %w", err)
 			}
+			// An explicit reindex is when constellations are recomputed.
+			if err := b.RecomputeClusters(); err != nil {
+				return fmt.Errorf("recompute clusters: %w", err)
+			}
 
 			fmt.Println("✓ Indexes rebuilt successfully")
 			slog.Info("indexes rebuilt", "brain", brainPath)

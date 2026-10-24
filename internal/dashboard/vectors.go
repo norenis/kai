@@ -58,6 +58,10 @@ func (s *Server) handleVectorsBuild(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := s.brain.RecomputeClusters(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -69,7 +73,7 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		Dims      int             `json:"dims"`
 		Notes     int             `json:"notes"`                // notes in the index, vault excluded
 		LastWrite string          `json:"last_write,omitempty"` // RFC 3339 time of the newest note change
-		Clusters  []brain.Cluster `json:"clusters"`             // constellations, largest first
+		Clusters  []brain.Cluster `json:"clusters"`             // constellations, largest first as of the last k-means
 	}
 
 	idx, _ := s.brain.LoadFullIndexCached()

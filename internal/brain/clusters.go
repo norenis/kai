@@ -96,13 +96,14 @@ func ComputeClusters(vi *VecIndex, idx *FullIndex) *ClusterSet {
 	for i, key := range keys {
 		cs.Assign[key] = assign[i]
 	}
-	cs.relabel(idx)
+	cs.relabel(idx, true)
 	return cs
 }
 
-// relabel orders clusters by size (renumbering ids and centroids so id 0 is
-// the largest), recounts notes and recomputes labels and numerals.
-func (cs *ClusterSet) relabel(idx *FullIndex) {
+// relabel recounts sizes and notes and recomputes labels and numerals. With
+// reorder set (fresh k-means) clusters are renumbered by size so id 0 is the
+// largest; otherwise ids and numerals stay put so the sky does not reshuffle.
+func (cs *ClusterSet) relabel(idx *FullIndex, reorder bool) {
 	k := len(cs.Centroids)
 	sizes := make([]int, k)
 	for _, c := range cs.Assign {
@@ -112,7 +113,9 @@ func (cs *ClusterSet) relabel(idx *FullIndex) {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool { return sizes[order[a]] > sizes[order[b]] })
+	if reorder {
+		sort.SliceStable(order, func(a, b int) bool { return sizes[order[a]] > sizes[order[b]] })
+	}
 	remap := make([]int, k)
 	centroids := make([][]float32, k)
 	for newID, old := range order {
@@ -497,7 +500,7 @@ func (cs *ClusterSet) reconciled(vi *VecIndex, idx *FullIndex) *ClusterSet {
 		}
 	}
 	out.Assign = assign
-	out.relabel(idx)
+	out.relabel(idx, false)
 	return &out
 }
 
@@ -568,8 +571,24 @@ func (b *FileBrain) Clusters() (*ClusterSet, error) {
 	return cs, nil
 }
 
-// storeClusters saves constellations computed during a reindex and makes
-// them the cached set for that index.
+// RecomputeClusters reruns k-means on the current vector index and saves the
+// result. Only explicit reindexes call it (`kai reindex`, the dashboard's
+// rebuild action): the background rebuilds that follow every write keep the
+// constellations stable and only place new chunks (see Clusters).
+func (b *FileBrain) RecomputeClusters() error {
+	b.mu.RLock()
+	vi, err := b.loadVecIndex()
+	if err != nil || vi == nil {
+		b.mu.RUnlock()
+		return nil
+	}
+	idx, _ := b.loadFullIndex()
+	b.mu.RUnlock()
+	return b.storeClusters(ComputeClusters(vi, idx), nil, nil)
+}
+
+// storeClusters saves constellations and makes them the cached set; with a
+// nil vi the next Clusters call reconciles them against the current index.
 func (b *FileBrain) storeClusters(cs *ClusterSet, vi *VecIndex, idx *FullIndex) error {
 	b.clMu.Lock()
 	defer b.clMu.Unlock()

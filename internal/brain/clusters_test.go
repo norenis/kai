@@ -205,17 +205,44 @@ func TestClusterCacheInvalidation(t *testing.T) {
 		t.Error("provider change should force a recompute")
 	}
 
-	// Reindex rebuilds the cache.
+	// Background rebuilds (after every write) keep the constellations.
 	time.Sleep(10 * time.Millisecond)
+	if err := b.Save(&BrainFile{Path: "knowledge/extra-note.md", Tags: []string{"go"}, Confidence: "medium",
+		Content: "\nGo channels and goroutines for backend services.\n"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := b.RebuildIndex(); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := b.Clusters()
+	if !after.BuiltAt.Equal(first.BuiltAt) {
+		t.Error("a background rebuild reran k-means")
+	}
+	for key, c := range first.Assign {
+		if after.Assign[key] != c {
+			t.Errorf("chunk %s moved from cluster %d to %d", key, c, after.Assign[key])
+			break
+		}
+	}
+	if _, ok := after.Assign["knowledge/extra-note.md#0"]; !ok {
+		t.Error("new chunk was not placed in a constellation")
+	}
+	for i, c := range after.Clusters {
+		if c.Numeral != first.Clusters[i].Numeral || c.ID != i {
+			t.Errorf("cluster %d renumbered: %+v", i, c)
+		}
+	}
+
+	// An explicit reindex recomputes.
+	if err := b.RecomputeClusters(); err != nil {
 		t.Fatal(err)
 	}
 	rebuilt, _ := b.Clusters()
 	if !rebuilt.BuiltAt.After(first.BuiltAt) {
-		t.Error("reindex did not recompute clusters")
+		t.Error("RecomputeClusters did not rerun k-means")
 	}
-	if !reflect.DeepEqual(rebuilt.Assign, first.Assign) {
-		t.Error("same index and seed produced different clusters")
+	if rebuilt.Chunks != first.Chunks+1 {
+		t.Errorf("recomputed over %d chunks, want %d", rebuilt.Chunks, first.Chunks+1)
 	}
 }
 

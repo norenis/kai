@@ -163,6 +163,8 @@ func (s *Server) ServeHTTP(addr, token string) error {
 	s.brain.SetEvents(bus, events.SourceMCP)
 	if err := s.brain.WatchDisk(context.Background()); err != nil {
 		slog.Warn("brain file watcher disabled", "err", err)
+	} else {
+		go reindexOnExternalWrites(context.Background(), bus, externalReindexDelay, s.triggerReindex)
 	}
 
 	// Mount dashboard at /dashboard.
