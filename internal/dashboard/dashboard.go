@@ -189,6 +189,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sync/status", auth(s.handleSyncStatus))
 	mux.HandleFunc("/api/vectors", auth(s.handleVectors))
 	mux.HandleFunc("/api/vectors/build", auth(s.handleVectorsBuild))
+	mux.HandleFunc("/api/reindex", auth(s.handleReindex))
 	mux.HandleFunc("/api/plugins", auth(s.handlePlugins))
 	mux.HandleFunc("/api/plugins/run", auth(s.handlePluginRun))
 	mux.HandleFunc("/api/events", auth(s.handleEvents))
@@ -391,6 +392,8 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTasksGet(w http.ResponseWriter, r *http.Request) {
 	type response struct {
 		Items []brain.TaskItem `json:"items"`
+		Path  string           `json:"path,omitempty"` // the task file shown
+		Today bool             `json:"today"`          // only today's file can be ticked
 	}
 
 	// Prefer today's tasks file; otherwise the most recent DATE-named file.
@@ -427,7 +430,7 @@ func (s *Server) handleTasksGet(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []brain.TaskItem{}
 	}
-	writeJSON(w, response{Items: items})
+	writeJSON(w, response{Items: items, Path: candidate, Today: candidate == brain.TaskFilePath(time.Now())})
 }
 func (s *Server) handleTasksToggle(w http.ResponseWriter, r *http.Request) {
 	type toggleReq struct {

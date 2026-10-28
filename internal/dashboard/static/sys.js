@@ -4,6 +4,10 @@
 
 import { relativeTime } from 'app/inflow.js';
 import { constellationName } from 'app/labels.js';
+import { renderTasks, renderIndex, renderReorganize } from 'app/sys-actions.js';
+
+// Tabs ported so far; the rest point to /classic.
+const ACTION_TABS = { tasks: renderTasks, index: renderIndex, reorganize: renderReorganize };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
@@ -85,9 +89,10 @@ export function recentRows(files, unusual, n = RECENT_ROWS) {
 }
 
 // mountSys builds the page inside el.
-//   api, data() → {vectors}, onOpen(path)
-export function mountSys(el, { api, data, onOpen }) {
+//   api, data() → {vectors}, onOpen(path), reloadVectors()
+export function mountSys(el, { api, data, onOpen, reloadVectors }) {
   let tab = 'overview';
+  let pendingAct = null; // an Overview action link to run once Index opens
   let cache = null, stale = true, loading = null;
 
   el.innerHTML = `
@@ -223,7 +228,11 @@ export function mountSys(el, { api, data, onOpen }) {
     });
     renderSummary();
     if (tab === 'overview') renderOverview();
-    else body.innerHTML = `<div class="soon"><p>This section is moving here.</p><p class="sc">meanwhile it lives in the <a href="classic">classic dashboard</a></p></div>`;
+    else if (ACTION_TABS[tab]) {
+      ACTION_TABS[tab](body, { api, data, onOpen, reloadVectors });
+      if (pendingAct) body.querySelector(`button.lk[data-a="${pendingAct}"]`)?.click();
+      pendingAct = null;
+    } else body.innerHTML = `<div class="soon"><p>This section is moving here.</p><p class="sc">meanwhile it lives in the <a href="classic">classic dashboard</a></p></div>`;
   }
 
   // The thumbnail sits over the page's top-right corner; once the page
@@ -232,26 +241,36 @@ export function mountSys(el, { api, data, onOpen }) {
   el.addEventListener('scroll', () => el.parentElement.toggleAttribute('data-scrolled', el.scrollTop > SCROLL_HIDE), { passive: true });
 
   body.addEventListener('click', (e) => {
-    const row = e.target.closest('tr[data-path]');
+    const act = e.target.closest('.ov a[data-act]');
+    if (act) { pendingAct = act.dataset.act; return; } // its href opens the Index tab
+    const row = e.target.closest('.ov tr[data-path]');
     if (row) onOpen(row.dataset.path);
   });
   body.addEventListener('keydown', (e) => {
-    const row = e.target.closest('tr[data-path]');
+    const row = e.target.closest('.ov tr[data-path]');
     if (row && e.key === 'Enter') onOpen(row.dataset.path);
   });
 
   return {
+    // show renders a tab. Action tabs render once per visit so a write
+    // made by their own action does not wipe its result.
     async show(name) {
       tab = TABS.some(([id]) => id === name) ? name : 'overview';
       renderTab();
       await load();
-      if (!el.hidden) renderTab();
+      renderSummary();
+      if (!el.hidden && tab === 'overview') renderOverview();
     },
     get tab() { return tab; },
     // markStale reloads the numbers after brain writes (or new vectors).
     markStale() {
       stale = true;
-      if (!el.hidden) load().then(() => { if (!el.hidden) renderTab(); });
+      if (el.hidden) return;
+      load().then(() => {
+        if (el.hidden) return;
+        renderSummary();
+        if (tab === 'overview') renderOverview();
+      });
     },
   };
 }

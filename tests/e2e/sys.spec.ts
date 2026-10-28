@@ -67,3 +67,58 @@ test.describe('Sys overview', () => {
     await expect(page.locator('#sys')).toBeHidden();
   });
 });
+
+test.describe('Sys actions', () => {
+  test('tasks: add one to today and tick it', async ({ page }) => {
+    await openSys(page, '#sys/tasks');
+    const tasks = page.locator('#sys .tasks');
+    await expect(tasks.locator('.th')).toBeVisible();
+    const text = `Stake the tomatoes ${Date.now()}`;
+    await tasks.locator('.pri').click(); // no priority → high
+    await tasks.locator('.add input').fill(text);
+    await tasks.locator('.add input').press('Enter');
+    const row = tasks.locator('.tk', { hasText: text });
+    await expect(row).toBeEnabled();
+    await expect(row).toHaveClass(/p-high/);
+    await expect(tasks.locator('.th')).toContainText('today');
+    await row.click();
+    await expect(row).toHaveClass(/done/);
+    await expect(row).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('index: decay dry run reports, rebuild needs confirmation, reindex runs', async ({ page }) => {
+    await openSys(page, '#sys/index');
+    const ix = page.locator('#sys .ix');
+    await expect(ix.locator('.kv').first()).toBeVisible();
+
+    await ix.locator('button.lk[data-a="decay"]').click();
+    await expect(ix.locator('.out')).toContainText(/nothing to decay|decay would change/i);
+
+    await ix.locator('button.lk[data-a="rebuild"]').click();
+    await expect(ix.locator('.confirm')).toContainText('Re-embed all');
+    await ix.locator('.confirm .no').click();
+    await expect(ix.locator('.confirm')).toHaveCount(0);
+    await expect(ix.locator('button.lk[data-a="rebuild"]')).toBeVisible();
+
+    await ix.locator('button.lk[data-a="reindex"]').click();
+    await expect(ix.locator('.out')).toContainText('index up to date', { timeout: 30_000 });
+  });
+
+  test('overview action links run in the Index tab', async ({ page }) => {
+    await openSys(page);
+    await page.locator('#sys .ov a[data-act="decay"]').click();
+    await expect(page).toHaveURL(/#sys\/index$/);
+    await expect(page.locator('#sys .ix .out')).toContainText(/nothing to decay|decay would change/i);
+  });
+
+  test('reorganize: lists suggestions; apply asks first', async ({ page }) => {
+    await openSys(page, '#sys/reorganize');
+    const rg = page.locator('#sys .rg');
+    await expect(rg.locator('.sg').first()).toBeVisible({ timeout: 30_000 });
+    const n = await rg.locator('.sg').count();
+    await rg.locator('button.lk[data-a="apply"]').click();
+    await expect(rg.locator('.confirm')).toContainText(`Apply ${n} suggestion`);
+    await rg.locator('.confirm .no').click();
+    await expect(rg.locator('.sg')).toHaveCount(n);
+  });
+});

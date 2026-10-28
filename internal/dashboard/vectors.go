@@ -65,6 +65,25 @@ func (s *Server) handleVectorsBuild(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
+// handleReindex does what `kai reindex` does: re-index the notes changed
+// since the last index, then recompute the constellations. A full rebuild
+// of every embedding is /api/vectors/build.
+func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.brain.RebuildIndexIncremental(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.brain.RecomputeClusters(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
 func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	type response struct {
 		Nodes     []vecNode       `json:"nodes"`

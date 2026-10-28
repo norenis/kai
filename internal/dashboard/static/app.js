@@ -285,6 +285,8 @@ sys = mountSys(document.getElementById('sys'), {
   api,
   data: () => ({ vectors: state.vectors }),
   onOpen: openNote,
+  // After a reindex or rebuild the sky, numerals and counts follow.
+  async reloadVectors() { await loadVectors(); renderIdentity(); },
 });
 window.fluctlight.sys = sys;
 // On Sys the scene is a live thumbnail; clicking it returns to the Sky.
