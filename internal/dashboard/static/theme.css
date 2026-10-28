@@ -256,3 +256,67 @@ body {
 #stage[data-s="sys"] .q { display: none; }
 
 #stage[data-render="fallback"] .foot { display: none; }
+
+/* Sys: the scene shrinks to a live thumbnail top-right */
+#stage[data-s="sys"] #gl {
+  transform: translate(-44px, 36px) scale(.2); z-index: 6; cursor: pointer; overflow: hidden;
+  border-radius: 80px; box-shadow: 0 0 0 5px rgba(216, 188, 132, .3), 0 40px 120px rgba(0, 0, 0, .6);
+  background: radial-gradient(ellipse at 50% 45%, var(--void-hi), var(--void));
+}
+#stage[data-s="sys"][data-scrolled] #gl { opacity: 0; pointer-events: none; }
+#stage[data-s="sys"] #gl:hover { box-shadow: 0 0 0 5px var(--gold-2), 0 40px 120px rgba(0, 0, 0, .6); }
+
+/* Sys page */
+.sys {
+  position: absolute; inset: 0 0 0 var(--rail); z-index: 5; overflow-y: auto;
+  padding: 44px 56px 56px; scrollbar-width: thin; scrollbar-color: var(--gold-3) transparent;
+}
+.sh { min-height: 196px; padding-right: 340px; }
+.sh h2 { font: italic 500 46px/1 var(--serif); color: #f6efe0; }
+.sh .sum { margin-top: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; }
+.tabs a { font: italic 500 18px var(--serif); color: var(--ink-2); text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 2px; }
+.tabs a:hover { color: var(--ink); }
+.tabs a.on { color: var(--gold); border-bottom-color: var(--gold); }
+.sb { border-top: 1px solid var(--gold-3); padding-top: 30px; }
+.sb .empty { padding: 0; }
+.soon p:first-child { font: italic 500 22px var(--serif); color: var(--ink-2); }
+.soon .sc { margin-top: 10px; }
+.soon a { color: var(--gold); }
+.ov .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 56px; }
+.ov .row2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 56px; margin-top: 44px; }
+.ov .wide { grid-column: span 2; }
+.ov h3 { color: var(--gold); margin-bottom: 16px; }
+.cst { display: grid; grid-template-columns: 28px 1fr auto; gap: 4px 10px; align-items: baseline; padding: 6px 0; }
+.cst .rn2 { font: 500 14px var(--serif); color: var(--gold); }
+.cst .t { font: italic 500 16px var(--serif); color: #efe7d6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cst .n { font: 300 12px var(--sans); color: var(--ink-2); }
+.cst .bar { grid-column: 2 / 4; height: 1px; background: rgba(216, 188, 132, .1); }
+.cst .bar i { display: block; height: 1px; background: var(--gold); box-shadow: 0 0 6px var(--gold-2); }
+.days { display: grid; grid-template-columns: repeat(14, 1fr); align-items: center; height: 34px; }
+.dd { display: flex; justify-content: center; }
+.dd i { display: block; border-radius: 50%; background: var(--ink-3); opacity: .5; }
+.dd.on i { background: var(--champagne); opacity: 1; box-shadow: 0 0 10px var(--gold), 0 0 3px #fff; }
+.dl2 { display: flex; justify-content: space-between; margin-top: 8px; }
+.big { margin-top: 22px; font: 300 12px var(--sans); letter-spacing: .14em; color: var(--ink-2); }
+.big b { font: 300 28px var(--sans); color: var(--ink); letter-spacing: .03em; margin-right: 8px; }
+.quiet { margin-top: 10px; }
+.kv { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px solid rgba(216, 188, 132, .08); }
+.kv .v { font: 300 13px var(--sans); color: var(--ink); text-align: right; }
+.kv .v.co { color: var(--coral); }
+.acts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 18px; }
+.acts a { font: italic 500 16px var(--serif); color: var(--gold); text-decoration: none; border-bottom: 1px solid var(--gold-2); }
+.acts a:hover { color: var(--champagne); }
+table.act { width: 100%; border-collapse: collapse; }
+.act th { text-align: left; font-weight: 400; padding: 0 12px 8px 0; }
+.act td { padding: 9px 12px 9px 0; border-top: 1px solid rgba(216, 188, 132, .1); font: 300 12px var(--sans); color: var(--ink-2); white-space: nowrap; }
+.act .num { text-align: right; }
+.act td.t { font: italic 500 16px var(--serif); color: #efe7d6; white-space: normal; }
+.act tbody tr { cursor: pointer; outline: none; }
+.act tbody tr:hover td, .act tbody tr:focus-visible td { background: rgba(216, 188, 132, .06); }
+.act tr.unusual td { color: var(--coral); }
+.act tr.unusual td.t { color: #ffb3a8; }
+.act .flag { color: var(--coral); margin-left: 8px; font-style: normal; }
+.tg { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
+.tg span { font-family: var(--serif); font-style: italic; font-weight: 500; color: #efe7d6; }
+.tg b { font: 400 9px var(--sans); color: var(--gold); margin-left: 5px; letter-spacing: .1em; }

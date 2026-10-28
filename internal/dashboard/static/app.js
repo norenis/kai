@@ -6,10 +6,12 @@ import { mountLabels, constellationName } from 'app/labels.js';
 import { mountInflow, connectEvents, relativeTime } from 'app/inflow.js';
 import { mountSearch } from 'app/cmdk.js';
 import { mountReader, noteClusters } from 'app/reader.js';
+import { mountSys } from 'app/sys.js';
 
 const SCREENS = ['sky', 'read', 'sys'];
 let search = null; // the ⌘K sheet, mounted below
 let reader = null; // the Read drawer, mounted below
+let sys = null; // the Sys page, mounted below
 
 const stage = document.getElementById('stage');
 const params = new URLSearchParams(location.search);
@@ -31,7 +33,7 @@ const labels = mountLabels(document.getElementById('labels'), scene);
 // Handle for e2e tests and performance measurements.
 window.fluctlight = { scene, get labels() { return labels; } };
 
-// Routes: #sky, #read (note list), #read/<path> (a note), #sys.
+// Routes: #sky, #read (note list), #read/<path> (a note), #sys, #sys/<tab>.
 function route() {
   const h = decodeURIComponent(location.hash.slice(1));
   const [screen, ...rest] = h.split('/');
@@ -50,6 +52,8 @@ function go() {
   } else {
     reader?.leave();
   }
+  document.getElementById('sys').hidden = screen !== 'sys';
+  if (screen === 'sys') sys?.show(path);
   document.querySelectorAll('.rail .ri').forEach((el) => {
     const on = el.dataset.r === screen;
     el.classList.toggle('on', on);
@@ -140,6 +144,7 @@ async function loadVectors() {
     labels.rebuild();
     stage.dataset.memories = String(scene.count);
     if (route().screen === 'read') go(); // numerals and highlights follow the new vectors
+    sys?.markStale();
   } catch (err) {
     console.error('load vectors', err);
   }
@@ -229,6 +234,7 @@ function onWrite(ev, live) {
     renderIdentity();
   }
   reader?.markStale();
+  sys?.markStale();
   if (!live) return;
   const unknown = (ev.chunks || []).filter((id) => !scene.has(id));
   if (ev.type !== 'delete') state.waitingFor = [...new Set([...(state.waitingFor || []), ...unknown])];
@@ -272,6 +278,19 @@ reader = mountReader(document.getElementById('drawer'), {
   onOpen: openNote,
 });
 window.fluctlight.reader = reader;
+
+// ---------- Sys page ----------
+
+sys = mountSys(document.getElementById('sys'), {
+  api,
+  data: () => ({ vectors: state.vectors }),
+  onOpen: openNote,
+});
+window.fluctlight.sys = sys;
+// On Sys the scene is a live thumbnail; clicking it returns to the Sky.
+document.getElementById('gl').addEventListener('click', () => {
+  if (stage.dataset.s === 'sys') location.hash = '#sky';
+});
 
 // esc leaves a note for the list, and the list for the Sky (unless the
 // sheet or a field has the key).
