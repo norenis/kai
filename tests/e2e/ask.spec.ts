@@ -127,3 +127,25 @@ test('⌘↵ streams a cited answer with sources, trace and follow-ups', async (
   await expect(page).toHaveURL(/#read\/.+/);
   expect(await page.evaluate(() => (window as any).fluctlight.opened)).toBe(path);
 });
+
+test('free chat answers without recalling memories', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => (window as any).fluctlight?.scene?.count > 0);
+  await page.keyboard.press('/');
+  const sheet = page.locator('#sheet');
+  const toggle = sheet.locator('.fm');
+  await expect(toggle).toHaveText('from memories');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const before = prompts.length;
+  await sheet.locator('input').fill('tell me a joke');
+  await page.keyboard.press('Control+Enter');
+  await expect(sheet.locator('.turn.last .ans')).toContainText('Feed the starter');
+  await expect(sheet.locator('.turn.last .tq')).toContainText('free chat');
+  await expect(sheet.locator('.turn.last .src')).toHaveCount(0);
+  await expect(sheet.locator('.tr')).toHaveText([/synthesize/i]);
+  await expect.poll(() => prompts.length).toBe(before + 1);
+  // No numbered memories in the prompt.
+  expect(prompts[before].system).not.toContain('### [i] ');
+  expect(prompts[before].messages.map((m) => m.role)).toEqual(['user']);
+});

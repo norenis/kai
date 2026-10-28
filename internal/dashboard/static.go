@@ -100,9 +100,10 @@ func handleStatic(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, sub, name)
 }
 
-// serveShell serves the new UI shell with the versioned asset prefix filled in.
-func serveShell(w http.ResponseWriter) {
-	data, err := templateFS.ReadFile("templates/index.html")
+// serveTemplate serves a page template (the shell or the lock screen) with
+// the versioned asset prefix filled in.
+func serveTemplate(w http.ResponseWriter, name string) {
+	data, err := templateFS.ReadFile(name)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return

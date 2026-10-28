@@ -122,3 +122,56 @@ test.describe('Sys actions', () => {
     await expect(rg.locator('.sg')).toHaveCount(n);
   });
 });
+
+test.describe('Sys import, tools and sync', () => {
+  test('import: a markdown file lands in the chosen category', async ({ page }) => {
+    await openSys(page, '#sys/import');
+    const im = page.locator('#sys .im');
+    await expect(im.locator('.go')).toBeDisabled();
+    const name = `imported-${Date.now()}.md`;
+    await im.locator('input[type="file"]').setInputFiles({
+      name, mimeType: 'text/markdown',
+      buffer: Buffer.from('# Imported note\n\nComets have two tails, one of dust and one of ions.\n'),
+    });
+    await expect(im.locator('.pf .t')).toHaveText(name);
+    await im.locator('.cats button[data-c="opinions"]').click();
+    await expect(im.locator('.hint')).toHaveText('1 file into opinions');
+    await im.locator('.go').click();
+    const row = im.locator('.ir.ok');
+    await expect(row).toHaveCount(1, { timeout: 30_000 });
+    const path = await row.getAttribute('data-path');
+    expect(path).toMatch(/^opinions\//);
+    await row.click();
+    await expect(page.locator('#drawer .note-view .nt')).toHaveText('Imported note');
+  });
+
+  test('plugins and tools: tools run and show their result', async ({ page }) => {
+    await openSys(page, '#sys/plugins');
+    const pt = page.locator('#sys .pt');
+    await expect(pt.locator('.pg').first()).toBeVisible();
+    await pt.locator('.tn button[data-t="brain_search"]').click();
+    await pt.locator('.tf input[name="query"]').fill('sourdough starter');
+    await pt.locator('.tf .run').click();
+    await expect(pt.locator('.tres')).toContainText('"chunk_id"');
+
+    // A tool that changes the brain asks first when apply is ticked.
+    await pt.locator('.tn button[data-t="brain_decay"]').click();
+    await pt.locator('.tf input[name="apply"]').check();
+    await pt.locator('.tf .run').click();
+    await expect(pt.locator('.confirm')).toContainText('Run brain_decay for real?');
+    await pt.locator('.confirm .no').click();
+    await expect(pt.locator('.tres')).toHaveCount(0);
+
+    // A plugin without its config reports why it cannot run.
+    await pt.locator('.pg button[data-run]').first().click();
+    await expect(pt.locator('.pg .res').first()).not.toBeEmpty();
+  });
+
+  test('sync: connections and an unconfigured backend', async ({ page }) => {
+    await openSys(page, '#sys/sync');
+    const sy = page.locator('#sys .sy');
+    await expect(sy.locator('.svc .kv').filter({ hasText: 'Embeddings' }).locator('.v')).toHaveText('lsi');
+    await expect(sy.locator('.svc .kv').filter({ hasText: 'LLM Provider' }).locator('.v')).toHaveText('not configured');
+    await expect(sy.locator('.ss')).toContainText('no sync backend configured');
+  });
+});

@@ -163,8 +163,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// All other routes require PIN/SSO if configured.
 	auth := s.withAuth
 	mux.HandleFunc("/", auth(s.handleIndex))
-	mux.HandleFunc("/classic", auth(s.handleClassic))
-	mux.HandleFunc("/classic/", auth(s.handleClassic))
+	mux.HandleFunc("/classic", handleClassicGone)
+	mux.HandleFunc("/classic/", handleClassicGone)
 	mux.HandleFunc("/static/", handleStatic)
 	mux.HandleFunc("/api/overview", auth(s.handleOverview))
 	mux.HandleFunc("/api/tasks", auth(s.handleTasks))
@@ -229,8 +229,7 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// For page requests, serve the lock screen.
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		serveEmbedded(w, "templates/lock.html")
+		serveTemplate(w, "templates/lock.html")
 	}
 }
 
@@ -288,24 +287,26 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
+// handleIndex serves the UI shell at the root; screens are hash routes, so
+// any other path is unknown (and would break the shell's relative URLs).
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	serveShell(w)
-}
-
-// handleClassic serves the previous dashboard UI until the new one reaches parity.
-func (s *Server) handleClassic(w http.ResponseWriter, r *http.Request) {
-	serveEmbedded(w, "templates/classic.html")
-}
-
-// serveEmbedded serves a raw embedded file as HTML.
-func serveEmbedded(w http.ResponseWriter, name string) {
-	data, err := templateFS.ReadFile(name)
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
+	serveTemplate(w, "templates/index.html")
+}
+
+// handleClassicGone sends old /classic bookmarks to the new UI. The target
+// stays relative so it also works under a proxy path prefix (http.Redirect
+// would make it absolute).
+func handleClassicGone(w http.ResponseWriter, r *http.Request) {
+	target := "./"
+	if strings.HasSuffix(r.URL.Path, "/") {
+		target = "../"
+	}
+	w.Header().Set("Location", target)
+	w.WriteHeader(http.StatusFound)
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {

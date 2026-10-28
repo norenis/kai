@@ -247,12 +247,12 @@ If the provider is unreachable at startup, kai logs a warning and falls back to 
 
 - Persistent memory (brain)
 - Hybrid search (BM25 + vector) with incremental indexing
-- 3D vector graph with hover highlighting and ANN link-building (scales to 5000+ nodes)
+- 3D sky of memories: every chunk placed by its embedding, grouped into constellations, with live effects as the brain learns
 - Task management — CLI, dashboard, and MCP
 - CLI-first workflow
 - MCP integration with Claude Code slash commands
 - Module system (GitHub PRs, Google Sheets, extensible)
-- Dashboard UI with collapsible sidebar, plugin management, and sync controls
+- Dashboard UI: Sky, ⌘K search and cited answers, a reader with related notes, and a maintenance page (tasks, index, reorganize, import, plugins and tools, sync); no CDN at runtime
 - Dashboard auth via PIN and/or OIDC SSO (Dex, Okta, Azure AD, ...)
 
 ---

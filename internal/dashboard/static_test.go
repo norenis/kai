@@ -52,16 +52,16 @@ func TestShellServedAtRoot(t *testing.T) {
 	}
 }
 
-func TestClassicServesOldDashboard(t *testing.T) {
+func TestClassicRedirectsAndUnknownPathsAre404(t *testing.T) {
 	mux := newTestMux(t, nil)
-	for _, p := range []string{"/classic", "/classic/"} {
-		res, body := get(t, mux, p)
-		if res.StatusCode != http.StatusOK {
-			t.Fatalf("%s: status = %d", p, res.StatusCode)
+	for p, want := range map[string]string{"/classic": "./", "/classic/": "../"} {
+		res, _ := get(t, mux, p)
+		if res.StatusCode != http.StatusFound || res.Header.Get("Location") != want {
+			t.Errorf("%s: %d -> %q, want 302 -> %q", p, res.StatusCode, res.Header.Get("Location"), want)
 		}
-		if !strings.Contains(body, `aria-label="Main navigation"`) || !strings.Contains(body, "createApp") {
-			t.Errorf("%s: does not look like the classic dashboard", p)
-		}
+	}
+	if res, _ := get(t, mux, "/no/such/page"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown path: status = %d", res.StatusCode)
 	}
 }
 
@@ -131,11 +131,12 @@ func TestStaticBehindAuthIsPublic(t *testing.T) {
 	cfg.Server.DashboardPIN = "1234"
 	mux := newTestMux(t, cfg)
 
-	if res, body := get(t, mux, "/"); res.StatusCode != http.StatusOK || strings.Contains(body, `class="rail"`) {
+	res, body := get(t, mux, "/")
+	if res.StatusCode != http.StatusOK || strings.Contains(body, `class="rail"`) {
 		t.Error("shell must sit behind the PIN lock")
 	}
-	if res, _ := get(t, mux, "/classic"); res.StatusCode != http.StatusOK {
-		t.Errorf("/classic lock page: status = %d", res.StatusCode)
+	if !strings.Contains(body, `id="pin-input"`) || !strings.Contains(body, "static/"+assetVersion()+"/theme.css") {
+		t.Error("lock page is not the themed PIN screen")
 	}
 	if res, _ := get(t, mux, "/static/"+assetVersion()+"/theme.css"); res.StatusCode != http.StatusOK {
 		t.Error("static assets carry no brain data and must load without a session")
@@ -156,6 +157,11 @@ func TestNewUIHasNoExternalURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("templates/index.html", shell)
+	lock, err := templateFS.ReadFile("templates/lock.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("templates/lock.html", lock)
 
 	err = fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

@@ -1,13 +1,16 @@
 // The Sys page (spec 7.6): maintenance, with the Overview tab here and the
-// action tabs filled in by later modules. The scene keeps running as a live
-// thumbnail in the top-right corner.
+// other tabs in sys-actions.js and sys-more.js. The scene keeps running as
+// a live thumbnail in the top-right corner.
 
 import { relativeTime } from 'app/inflow.js';
 import { constellationName } from 'app/labels.js';
 import { renderTasks, renderIndex, renderReorganize } from 'app/sys-actions.js';
+import { renderImport, renderPlugins, renderSync } from 'app/sys-more.js';
 
-// Tabs ported so far; the rest point to /classic.
-const ACTION_TABS = { tasks: renderTasks, index: renderIndex, reorganize: renderReorganize };
+const ACTION_TABS = {
+  tasks: renderTasks, index: renderIndex, reorganize: renderReorganize,
+  import: renderImport, plugins: renderPlugins, sync: renderSync,
+};
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
@@ -228,11 +231,11 @@ export function mountSys(el, { api, data, onOpen, reloadVectors }) {
     });
     renderSummary();
     if (tab === 'overview') renderOverview();
-    else if (ACTION_TABS[tab]) {
+    else {
       ACTION_TABS[tab](body, { api, data, onOpen, reloadVectors });
       if (pendingAct) body.querySelector(`button.lk[data-a="${pendingAct}"]`)?.click();
       pendingAct = null;
-    } else body.innerHTML = `<div class="soon"><p>This section is moving here.</p><p class="sc">meanwhile it lives in the <a href="classic">classic dashboard</a></p></div>`;
+    }
   }
 
   // The thumbnail sits over the page's top-right corner; once the page

@@ -39,6 +39,7 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     <div class="fb">
       <span class="sc for-search"><kbd>↑↓</kbd>move</span><span class="sc for-search"><kbd>↵</kbd>read</span><span class="sc for-search"><kbd>esc</kbd>close</span>
       <span class="sc for-ask">follow up…</span><span class="sc for-ask"><kbd>esc</kbd>collapse · history kept</span>
+      <button type="button" class="sc fm" aria-pressed="false" title="Answer from memories, or chat freely without them">from memories</button>
       <span class="sc ask"><kbd>⌘↵</kbd><span class="ask-label"></span></span>
     </div>`;
   const input = el.querySelector('input');
@@ -46,12 +47,14 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   const traceEl = el.querySelector('.trace');
   const list = el.querySelector('.res');
   const askEl = el.querySelector('.ask');
+  const freeEl = el.querySelector('.fm');
   const conv = el.querySelector('.conv');
 
   // Ask conversation: [{q, answer, sources, trace, streaming, error}].
   let mode = 'search';
   const turns = [];
   let asking = false;
+  let free = false; // free chat: the LLM answers without recalling memories
 
   let open = false, results = [], sel = 0, timer = 0, ctrl = null, seq = 0, query = '';
   let traceTimers = [];
@@ -62,6 +65,9 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     const ok = llm();
     askEl.classList.toggle('dis', !ok);
     askEl.querySelector('.ask-label').innerHTML = ok ? '<i>ask</i>' : 'ask · no llm configured';
+    freeEl.hidden = !ok;
+    freeEl.textContent = free ? 'free chat' : 'from memories';
+    freeEl.setAttribute('aria-pressed', String(free));
   }
 
   // renderTrace lights the first `lit` stages in sequence (all by default);
@@ -121,7 +127,7 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   function renderConv() {
     conv.innerHTML = turns.map((t, k) => `
       <div class="turn${k === turns.length - 1 ? ' last' : ''}">
-        <div class="tq">${esc(t.q)}</div>
+        <div class="tq">${esc(t.q)}${t.free ? ' <span class="sc">free chat</span>' : ''}</div>
         <div class="ans">${t.error ? `<span class="err">${esc(t.error)}</span>` : renderAnswer(t.answer)}${t.streaming ? '<span class="caret"></span>' : ''}</div>
         ${t.sources?.length ? `<div class="src">${t.sources.map((s) => `<span data-path="${esc(s.path)}" role="button" tabindex="0"><b>${esc(s.numeral)}</b>${esc(s.title)}</span>`).join('')}</div>` : ''}
       </div>`).join('');
@@ -143,17 +149,19 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     ctrl?.abort();
     clearTimeout(timer);
     setMode('ask');
-    const history = turns.filter((t) => !t.error).flatMap((t) => [{ role: 'user', content: t.q }, { role: 'assistant', content: t.answer }]);
-    const turn = { q, answer: '', sources: [], trace: null, streaming: true, error: '' };
+    // Free chat sends one message: the server keeps no history for it.
+    const history = free ? [] : turns.filter((t) => !t.error && !t.free).flatMap((t) => [{ role: 'user', content: t.q }, { role: 'assistant', content: t.answer }]);
+    const turn = { q, answer: '', sources: [], trace: null, streaming: true, error: '', free };
     turns.push(turn);
     input.value = '';
     renderConv();
-    renderTrace({ stages: [{ name: 'embed', ms: 0 }, { name: 'recall', ms: 0 }, { name: 'synthesize', ms: 0 }] }, 0);
+    const t0 = performance.now();
+    renderTrace({ stages: free ? [{ name: 'synthesize', ms: 0 }] : [{ name: 'embed', ms: 0 }, { name: 'recall', ms: 0 }, { name: 'synthesize', ms: 0 }] }, 0);
     try {
       const res = await fetch('api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: q, mode: 'brain', history }),
+        body: JSON.stringify({ message: q, mode: free ? 'free' : 'brain', history }),
       });
       if (res.status === 401) { location.reload(); return; }
       if (!res.ok || !res.body) throw new Error((await res.text()).replace(/[{}"]/g, '').replace(/^error:/, '') || `ask failed (${res.status})`);
@@ -179,6 +187,7 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
             }
             if (evt.content) turn.answer += evt.content;
             if (evt.done && evt.trace) { turn.trace = evt.trace; renderTrace(evt.trace); }
+            if (evt.done && turn.free) renderTrace({ stages: [{ name: 'synthesize', ms: performance.now() - t0, count: 0 }] });
           }
           renderConvSoon();
         }
@@ -294,6 +303,11 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   list.addEventListener('click', (e) => {
     const row = e.target.closest('.r');
     if (row) choose(Number(row.dataset.i));
+  });
+  freeEl.addEventListener('click', () => {
+    free = !free;
+    renderAsk();
+    input.focus();
   });
   conv.addEventListener('click', (e) => {
     const src = e.target.closest('.src span');

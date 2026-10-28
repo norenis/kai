@@ -1,17 +1,17 @@
 // Sys action tabs (spec 7.6): Tasks, Index and Reorganize. Long or
 // destructive actions ask for an inline confirmation and show progress.
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
-const plural = (n, w) => `${fmtInt(n)} ${w}${n === 1 ? '' : 's'}`;
-const post = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
+export const plural = (n, w) => `${fmtInt(n)} ${w}${n === 1 ? '' : 's'}`;
+export const post = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
 
 const PRIORITIES = ['', 'high', 'medium', 'low'];
 const PRIORITY_MARK = /\s*[🔴🟡🟢]\s*/gu;
 
 // confirmInline swaps an action link for "question · confirm · cancel" and
 // resolves with the choice.
-function confirmInline(btn, question) {
+export function confirmInline(btn, question) {
   return new Promise((resolve) => {
     const box = document.createElement('span');
     box.className = 'confirm';
@@ -27,7 +27,7 @@ function confirmInline(btn, question) {
 
 // running shows an elapsed-time progress line in el while fn runs; the
 // page's action links are disabled meanwhile.
-async function running(page, el, label, fn) {
+export async function running(page, el, label, fn) {
   const t0 = performance.now();
   const tick = () => { el.innerHTML = `<div class="prog sc"><b></b>${esc(label)} · ${((performance.now() - t0) / 1000).toFixed(0)} s</div>`; };
   tick();
@@ -41,7 +41,7 @@ async function running(page, el, label, fn) {
   }
 }
 
-const errLine = (err) => `<div class="sc res-err"><span class="co">${esc(err.message || err)}</span></div>`;
+export const errLine = (err) => `<div class="sc res-err"><span class="co">${esc(err.message || err)}</span></div>`;
 
 // ---------- Tasks ----------
 

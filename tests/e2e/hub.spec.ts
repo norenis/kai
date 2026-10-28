@@ -60,11 +60,16 @@ test.describe('Fluctlight Hub shell', () => {
     expect(ok).toEqual([true, true, true]);
   });
 
-  test('/classic still serves the old overview', async ({ page }) => {
+  test('/classic bookmarks land on the new UI', async ({ page }) => {
     await page.goto('/classic');
-    await expect(page.locator('#app')).toBeVisible();
-    await expect(page.locator('nav[aria-label="Main navigation"]').getByText('Overview')).toBeVisible();
-    await expect(page.locator('#overview-heading')).toHaveText('Overview');
-    await expect(page.locator('#stat-files')).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator('.rail')).toBeVisible();
+  });
+
+  test('API endpoints respond', async ({ request }) => {
+    for (const p of ['/api/overview', '/api/info', '/api/tags', '/api/files', '/api/status', '/api/sync/status', '/api/plugins', '/api/tools']) {
+      expect((await request.get(p)).ok(), p).toBeTruthy();
+    }
+    expect(await (await request.get('/api/overview')).json()).toHaveProperty('total_files');
   });
 });
