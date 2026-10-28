@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // demoBrainDir is the synthetic brain shared by Go and Playwright tests.
@@ -76,5 +77,42 @@ func TestDemoBrainReindexesOfflineWithLSI(t *testing.T) {
 		if !cats[c] {
 			t.Errorf("demo brain has no %s notes", c)
 		}
+	}
+}
+
+// An incremental reindex of a few changed notes must finish (it once
+// deadlocked by read-locking while holding the write lock) and index them.
+func TestIncrementalReindexOfAFewChangedNotes(t *testing.T) {
+	dir := copyDemoBrain(t)
+	b := New(dir)
+	b.SetEmbedOptions(EmbedOptions{Provider: EmbedLSI})
+	if err := b.RebuildIndex(); err != nil {
+		t.Fatalf("RebuildIndex: %v", err)
+	}
+	note := "---\ntags: [comets]\nconfidence: low\nsource: cli\nupdated: 2026-10-27\n---\n# Comet tails\n\nA comet's ion tail points away from the sun.\n"
+	if err := os.WriteFile(filepath.Join(dir, "knowledge", "comet-tails.md"), []byte(note), FilePermissions); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- b.RebuildIndexIncremental() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RebuildIndexIncremental: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("RebuildIndexIncremental did not finish (deadlock?)")
+	}
+
+	vi, err := b.LoadVecIndex()
+	if err != nil || vi == nil {
+		t.Fatalf("LoadVecIndex: %v", err)
+	}
+	if _, ok := vi.ChunkVecs["knowledge/comet-tails.md#0"]; !ok {
+		t.Error("changed note not embedded")
+	}
+	if _, ok := vi.ChunkVecs["knowledge/table-driven-tests-in-go.md#0"]; !ok {
+		t.Error("unchanged note lost its embedding")
 	}
 }

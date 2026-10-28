@@ -452,9 +452,7 @@ func (b *FileBrain) rebuildIndexIncremental() error {
 	}
 	dirtyChunkTexts := b.snapshotChunkTexts(idx, dirty)
 
-	b.mu.RLock()
-	existingVI, _ := b.loadVecIndex()
-	b.mu.RUnlock()
+	existingVI, _ := b.loadVecIndex() // the write lock is already held
 
 	removePaths := make(map[string]bool, len(dirty)+len(deleted))
 	for _, p := range dirty {
