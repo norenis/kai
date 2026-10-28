@@ -6,6 +6,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -115,5 +117,35 @@ func TestImportRejectsVaultCategory(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), "invalid category") {
 			t.Errorf("category %q: %s", cat, rec.Body.String())
 		}
+	}
+}
+
+func TestImportKeepsTheWholeFile(t *testing.T) {
+	mux, dir := newDemoMux(t)
+	// Large enough to span many reads; the last line must survive.
+	body := "# Long import\n\n" + strings.Repeat("A line of imported text that repeats.\n", 20000) + "The very last line.\n"
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("category", "knowledge")
+	mw.WriteField("auto_chunk", "false")
+	fw, _ := mw.CreateFormFile("files", "long-import.md")
+	fw.Write([]byte(body))
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/import", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"error"`) {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	var saved []byte
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && strings.HasPrefix(d.Name(), "long-import") {
+			saved, _ = os.ReadFile(p)
+		}
+		return nil
+	})
+	if !bytes.Contains(saved, []byte("The very last line.")) {
+		t.Fatalf("saved import is cut short: %d bytes", len(saved))
 	}
 }

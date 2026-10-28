@@ -849,10 +849,11 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		defer file.Close()
-
-		data := make([]byte, fileHeader.Size)
-		if _, err := file.Read(data); err != nil {
+		// One Read may return less than the whole part; close each file
+		// here rather than deferring every one to the end of the request.
+		data, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
 			results = append(results, importResult{
 				Path:  fileHeader.Filename,
 				Error: "failed to read file",

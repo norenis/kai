@@ -52,14 +52,36 @@ test.describe('Sky constellations', () => {
   test('labels the three largest constellations and orbits one numeral per cluster', async ({ page, request }) => {
     const vectors = await (await request.get('/api/vectors')).json();
     expect(vectors.clusters.length).toBeGreaterThanOrEqual(5);
+    // A still sphere: while it turns, collision hiding may drop a label for a moment.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
     await page.waitForFunction(() => (window as any).fluctlight?.scene?.constellations?.length > 0);
     await expect(page.locator('#identity .n')).toContainText(`${vectors.clusters.length} constellations`);
     await expect(page.locator('#labels .rn')).toHaveCount(vectors.clusters.length);
     await page.waitForTimeout(800); // labels fade in
-    const shown = await page.$$eval('#labels .cl', (els) =>
-      els.filter((e) => parseFloat(getComputedStyle(e).opacity) > 0.05).map((e) => Number((e as HTMLElement).dataset.cluster)).sort());
-    expect(shown).toEqual([0, 1, 2]);
+    // Only the three largest are labelled; one of them may give way to a
+    // collision (earlier suites write to the brain and move the clusters),
+    // but then it really does touch a shown label or an overlay.
+    const { shown, unexplained } = await page.evaluate(() => {
+      const els = [...document.querySelectorAll<HTMLElement>('#labels .cl')];
+      const rect = (e: Element) => e.getBoundingClientRect();
+      const gap = 8;
+      const touch = (a: DOMRect, b: DOMRect) => a.left < b.right + gap && b.left < a.right + gap && a.top < b.bottom + gap && b.top < a.bottom + gap;
+      const on = els.filter((e) => parseFloat(getComputedStyle(e).opacity) > 0.05);
+      const blockers = [...on.map((e) => rect(e.firstElementChild!)),
+        ...['#identity', '#inflow', '#query', '.rail'].map((s) => rect(document.querySelector(s)!))];
+      const unexplained = els
+        .filter((e) => Number(e.dataset.cluster) < 3 && !on.includes(e))
+        .filter((e) => {
+          const r = rect(e.firstElementChild!);
+          return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && !blockers.some((b) => touch(r, b));
+        })
+        .map((e) => Number(e.dataset.cluster));
+      return { shown: on.map((e) => Number(e.dataset.cluster)).sort(), unexplained };
+    });
+    expect(shown.every((c) => c < 3)).toBe(true);
+    expect(shown).toContain(0);
+    expect(unexplained).toEqual([]);
     const first = page.locator('#labels .cl[data-cluster="0"]');
     await expect(first.locator('.sc')).toHaveText(`I · ${vectors.clusters[0].size} memories`);
   });
