@@ -148,7 +148,8 @@ body {
 .r .scv i { display: block; height: 1px; margin-top: 8px; margin-left: auto; background: linear-gradient(90deg, transparent, var(--gold)); }
 .sheet .fb { display: flex; align-items: center; gap: 18px; padding: 12px 24px 14px; border-top: 1px solid rgba(216, 188, 132, .12); }
 .sheet .fb kbd { font: 400 9px var(--sans); letter-spacing: .14em; color: var(--gold); border: 1px solid var(--gold-3); padding: 3px 6px; margin-right: 6px; }
-.sheet .fb .ask { margin-left: auto; }
+.sheet .fb .ask { margin-left: auto; cursor: pointer; }
+.sheet .fb .ask.dis { cursor: default; }
 .sheet .fb .dis { opacity: .45; }
 .sheet .fb .fm { margin-left: auto; background: none; border: 0; cursor: pointer; border-bottom: 1px solid transparent; padding-bottom: 1px; }
 .sheet .fb .fm:hover { color: var(--ink-2); }
@@ -420,3 +421,89 @@ table.act { width: 100%; border-collapse: collapse; }
 .tres { margin-top: 4px; max-height: 360px; overflow: auto; padding: 14px 16px; border-radius: 10px; background: rgba(0, 0, 0, .35); border: 1px solid rgba(216, 188, 132, .12); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #dfe6ea; white-space: pre-wrap; }
 .svc .v.ok { color: var(--gold); }
 .ss .ia { margin-top: 18px; }
+
+/* Small screens (< 900 px): the rail becomes a bottom bar, sheets and the
+   drawer go full screen, and grids collapse to one column. */
+.sheet .x { display: none; background: none; border: 0; cursor: pointer; }
+@media (max-width: 899px) {
+  :root { --rail: 0px; --bar: 56px; }
+  .rail {
+    top: auto; right: 0; width: auto; height: var(--bar); padding: 0 0 env(safe-area-inset-bottom);
+    flex-direction: row; justify-content: space-around; gap: 0;
+    border-right: 0; border-top: 1px solid rgba(216, 188, 132, .14);
+    background: linear-gradient(0deg, rgba(3, 6, 11, .92), rgba(3, 6, 11, .7));
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .rail .mark { display: none; }
+  .ri { flex: 1; height: 100%; justify-content: center; }
+  .ri:focus-visible { outline-offset: -6px; }
+
+  .id { left: 22px; top: 24px; }
+  .id .nm { font-size: 42px; }
+  .id .n { font-size: 13px; }
+  .id .n b { font-size: 22px; }
+  .id .hr { width: 160px; }
+  .inf { right: 22px; top: 24px; }
+  .foot { display: none; }
+  .q { bottom: calc(var(--bar) + 22px); width: min(480px, calc(100vw - 44px)); }
+  #stage[data-s="read"] .q { display: none; }
+  .cl .t { font-size: 16px; }
+  .rn { font-size: 13px; }
+
+  .sheet {
+    inset: 0 0 var(--bar) 0; width: auto; transform: none; border-radius: 0; border: 0;
+    display: flex; flex-direction: column;
+  }
+  .sheet .x { display: block; }
+  .sheet .in { padding: 16px 18px 12px; }
+  .sheet .in .sc.meta { display: none; }
+  .trace { padding: 10px 18px 4px; overflow-x: auto; scrollbar-width: none; }
+  .trace::-webkit-scrollbar { display: none; }
+  .tr { flex: none; }
+  .res { flex: 1; max-height: none; padding: 6px 4px; }
+  .conv { flex: 1; max-height: none; }
+  .r { grid-template-columns: 26px 1fr 46px; gap: 8px; padding: 10px; }
+  .sheet .fb { padding: 12px 18px 14px; }
+  .sheet .fb .for-search, .sheet .fb .for-ask, .sheet .fb kbd { display: none; }
+  .sheet .fb .fm { margin-left: 0; }
+  .sheet .fb .ask { margin-left: auto; }
+  .turn .tq, .ans, .src { padding-left: 18px; padding-right: 18px; }
+
+  .drawer { width: auto; left: 0; bottom: var(--bar); border-left: 0; }
+  .dh { padding: 22px 20px 14px; }
+  .dl { padding: 4px 8px 20px; }
+  .crumb { padding: 20px 20px 0; flex-wrap: wrap; row-gap: 4px; }
+  .nv { padding: 12px 20px 28px; }
+  .nt { font-size: 30px; }
+
+  .sys { inset: 0 0 var(--bar) 0; padding: 26px 20px 40px; }
+  #stage[data-s="sys"] #gl { opacity: 0; pointer-events: none; }
+  .sh { min-height: 0; padding-right: 0; padding-bottom: 6px; }
+  .sh h2 { font-size: 38px; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; gap: 22px; margin-top: 22px; padding-bottom: 10px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs a { white-space: nowrap; flex: none; }
+  .sb { padding-top: 24px; }
+  .ov .row3, .ov .row2, .ix .row3, .pt .row3, .sy .row3 { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .ov .row2 { margin-top: 36px; }
+  .ov .wide, .ix .wide, .pt .wide, .sy .wide { grid-column: auto; }
+  .opts .kv { flex-wrap: wrap; }
+  .opts .kv input { max-width: none; text-align: left; }
+  .cats { justify-content: flex-start; }
+}
+@media (max-width: 599px) {
+  /* Phones: the latest arrival only, under the identity block. */
+  .inf { left: 22px; right: auto; top: 188px; text-align: left; }
+  .inf .ev ~ .ev { display: none; }
+  .id .hr { display: none; }
+  table.act { display: block; overflow-x: auto; }
+  .act td.t { min-width: 160px; }
+  .drop { padding: 24px 16px; }
+}
+
+/* Reduced motion: no CSS animation or easing either (the scene stops its own). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
+/* Touch-only devices have no ⌘K to show. */
+@media (hover: none) { .q kbd { display: none; } }

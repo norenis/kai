@@ -204,7 +204,13 @@ function mountPicking() {
   gl.addEventListener('pointerup', (e) => {
     const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
     down = null;
-    if (!moved && hoverId) openNote(scene.node(hoverId)?.doc);
+    if (moved || stage.dataset.s !== 'sky') return;
+    // Touch has no hover: a tap picks where it lands.
+    if (e.pointerType !== 'mouse') {
+      const r = gl.getBoundingClientRect();
+      hoverId = scene.pickAt(e.clientX - r.left, e.clientY - r.top);
+    }
+    if (hoverId) openNote(scene.node(hoverId)?.doc);
   });
 }
 

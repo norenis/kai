@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { fullTurnWithoutLabelOverlap } from './labels-turn';
 
 test.describe('Sky identity', () => {
   test('shows the brain name, memory count and status line', async ({ page, request }) => {
@@ -61,6 +62,13 @@ test.describe('Sky constellations', () => {
     expect(shown).toEqual([0, 1, 2]);
     const first = page.locator('#labels .cl[data-cluster="0"]');
     await expect(first.locator('.sc')).toHaveText(`I · ${vectors.clusters[0].size} memories`);
+  });
+
+  test('labels never overlap over a full turn', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/');
+    await page.waitForFunction(() => (window as any).fluctlight?.scene?.constellations?.length > 0);
+    await fullTurnWithoutLabelOverlap(page);
   });
 
   test('labels hide outside the Sky', async ({ page }) => {

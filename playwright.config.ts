@@ -16,7 +16,10 @@ export default defineConfig({
     headless: true,
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: /small\.spec\.ts/ },
+    // Small screens (< 900 px layout): a phone and a tablet in portrait.
+    { name: 'phone', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, hasTouch: true }, testMatch: /small\.spec\.ts/ },
+    { name: 'tablet', use: { browserName: 'chromium', viewport: { width: 768, height: 1024 }, hasTouch: true }, testMatch: /small\.spec\.ts/ },
   ],
   webServer: {
     command: './tests/e2e/serve-demo.sh',

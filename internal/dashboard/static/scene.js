@@ -32,6 +32,12 @@ const PIXEL_RATIO_STEP = 0.25;
 // 430 on a 900 px tall stage).
 const POINT_SCALE = 430 / 900;
 const IDLE_RESUME_MS = 30_000;
+// Below this width the layout is the small-screen one: no bloom, smaller points.
+export const SMALL_SCREEN = 900;
+const SMALL_POINT_SCALE = 0.8;
+// The views were framed for a landscape stage; narrower than this aspect the
+// camera backs off so the sphere still fits across the width.
+const MIN_FRAMED_ASPECT = 0.8;
 const DAY_MS = 864e5;
 
 const C = {
@@ -451,13 +457,20 @@ function createWebGLScene(host) {
   }
 
   // ---------- sizing ----------
+  let fit = 1; // camera distance factor for narrow (portrait) stages
+  let small = false;
   function resize() {
     const w = host.clientWidth || window.innerWidth, h = host.clientHeight || window.innerHeight;
     renderer.setSize(w, h, false);
     composer.setSize(w, h);
     cam.aspect = w / h;
     cam.updateProjectionMatrix();
-    const scale = POINT_SCALE * h * pixelRatio;
+    fit = Math.max(1, MIN_FRAMED_ASPECT / cam.aspect);
+    // The Sys thumbnail is a scaled-down full stage, so the window decides.
+    small = window.innerWidth < SMALL_SCREEN;
+    bloom.enabled = !small;
+    // Backing off already shrinks the points with the sphere; small screens a bit more.
+    const scale = POINT_SCALE * h * pixelRatio * (small ? SMALL_POINT_SCALE : 1);
     soulMat.uniforms.uScale.value = scale;
     shellMat.uniforms.uScale.value = scale;
     starMat.uniforms.uScale.value = scale;
@@ -471,7 +484,14 @@ function createWebGLScene(host) {
   const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
   let reducedMotion = motionQuery.matches;
   let lastInteraction = -Infinity;
-  const onMotionChange = (e) => { reducedMotion = e.matches; };
+  const onMotionChange = (e) => { reducedMotion = e.matches; applyMotion(); };
+  // Reduced motion: no twinkle, no damping drift after a drag, and the camera
+  // cuts between views instead of gliding.
+  function applyMotion() {
+    ctl.enableDamping = !reducedMotion;
+    for (const m of [soulMat, shellMat, starMat]) m.uniforms.uTwinkle.value = reducedMotion ? 0 : 1;
+  }
+  applyMotion();
   motionQuery.addEventListener('change', onMotionChange);
   ctl.addEventListener('start', () => { lastInteraction = performance.now(); ctl.autoRotate = false; });
 
@@ -493,7 +513,7 @@ function createWebGLScene(host) {
   // ---------- render loop ----------
   const tgt = new THREE.Vector3();
   const off = new THREE.Vector3();
-  let dist = VIEWS.sky.d;
+  let dist = VIEWS.sky.d * fit;
   let t = 0, last = performance.now(), raf = 0, running = false;
   let frames = 0, fpsWindowStart = last, fps = 0, worstFrame = 0;
   const listeners = new Set();
@@ -527,10 +547,10 @@ function createWebGLScene(host) {
 
     // Camera glides to the current view (frame-rate independent ease).
     const v = VIEWS[view];
-    const k = 1 - Math.pow(0.95, dt * 60);
+    const k = reducedMotion ? 1 : 1 - Math.pow(0.95, dt * 60);
     tgt.set(...v.t);
     ctl.target.lerp(tgt, k);
-    dist += (v.d - dist) * k;
+    dist += (v.d * fit - dist) * k;
     off.copy(cam.position).sub(ctl.target).setLength(dist);
     cam.position.copy(ctl.target).add(off);
 
@@ -714,6 +734,7 @@ function createWebGLScene(host) {
     get running() { return running; },
     get fps() { return fps; },
     get pixelRatio() { return pixelRatio; },
+    get bloom() { return bloom.enabled; },
     get view() { return view; },
     get highlighted() { return highlight.size; },
     get secondaryHighlighted() { return secondary.size; },
@@ -780,7 +801,8 @@ function createFallback(host) {
     x.fillRect(0, 0, w, h);
 
     // Fixed oblique view: yaw then pitch, simple perspective.
-    const scale = h / 4.6, cx = w / 2, cy = h / 2 + h * 0.02;
+    // Portrait stages fit the sphere to the width instead.
+    const scale = Math.min(h / 4.6, w / 3.8), cx = w / 2, cy = h / 2 + h * 0.02;
     const yaw = 0.6, pitch = 0.15, camD = 6.9;
     const project = (px, py, pz) => {
       const x1 = px * Math.cos(yaw) - pz * Math.sin(yaw);

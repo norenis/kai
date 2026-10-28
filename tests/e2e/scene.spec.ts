@@ -73,4 +73,15 @@ test.describe('Sky scene with reduced motion', () => {
     });
     expect(s).toEqual({ reduced: true, rotating: false });
   });
+
+  test('cuts between views instead of gliding, and CSS motion stops', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/#sky');
+    await waitForScene(page);
+    await page.evaluate(() => { location.hash = '#read'; });
+    await page.waitForTimeout(250);
+    const d = await page.evaluate(() => (window as any).fluctlight.scene.distance);
+    expect(d).toBeCloseTo(7.2, 1); // VIEWS.read.d, reached within a frame or two
+    expect(await page.locator('#gl').evaluate((el) => getComputedStyle(el).transitionDuration)).toMatch(/^0\.001s/);
+  });
 });

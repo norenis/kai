@@ -32,6 +32,7 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
       <span class="ic" aria-hidden="true"></span>
       <input class="v" type="search" autocomplete="off" spellcheck="false" aria-label="Search memories" placeholder="Search memories…">
       <span class="sc meta" aria-live="polite"></span>
+      <button type="button" class="sc x" aria-label="Close search">close</button>
     </div>
     <div class="trace" aria-label="Recall trace"></div>
     <div class="res" role="listbox" aria-label="Results"></div>
@@ -304,6 +305,9 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
     const row = e.target.closest('.r');
     if (row) choose(Number(row.dataset.i));
   });
+  // Touch screens have no esc or ⌘↵: a close button and a tappable ask.
+  el.querySelector('.x').addEventListener('click', hide);
+  askEl.addEventListener('click', () => { if (llm()) ask(input.value); });
   freeEl.addEventListener('click', () => {
     free = !free;
     renderAsk();
