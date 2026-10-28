@@ -3,6 +3,7 @@
 
 import { relativeTime } from 'app/inflow.js';
 import { constellationName } from 'app/labels.js';
+import { renderMarkdown } from 'app/markdown.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtInt = (n) => Number(n || 0).toLocaleString('en-US');
@@ -11,6 +12,7 @@ const CATEGORY_ORDER = ['knowledge', 'identity', 'opinions', 'decisions', 'style
 const SORTS = { recent: 'recent', reads: 'reads', az: 'A-Z' };
 const CHIPS_SHOWN = 3;
 const NOTE_COLOR = '#ffd27a';
+const PIN_HEADER = 'X-Kai-Vault-Pin';
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
@@ -30,6 +32,31 @@ export function noteClusters(nodes) {
     out.set(doc, best);
   }
   return out;
+}
+
+// noteBody drops the leading "# Title" heading, which the view already
+// shows as the note's title.
+export function noteBody(content, title) {
+  const m = /^\s*# +(.+?)\s*(?:\n|$)/.exec(content || '');
+  return m && m[1].trim() === String(title || '').trim() ? content.slice(m[0].length) : content || '';
+}
+
+// copyText uses the clipboard API, which needs a secure context, and falls
+// back to a hidden textarea on plain http.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
 }
 
 // filterNotes applies the text filter (title, path, tags, constellation) and
@@ -171,10 +198,165 @@ export function mountReader(el, { api, scene, data, onClose, onOpen }) {
   });
   el.querySelector('.x').addEventListener('click', onClose);
 
+  // ---------- note view ----------
+
+  let note = null; // {path, file, related} of the open note
+  let opening = 0; // ignores responses for a note that is no longer wanted
+  let pin = ''; // vault PIN, kept in memory for this page only
+
+  // fetchNote reads a note and its neighbours; null means the vault PIN is
+  // needed (or was wrong).
+  async function fetchNote(path) {
+    const q = `?path=${encodeURIComponent(path)}`;
+    const headers = pin ? { [PIN_HEADER]: pin } : {};
+    const res = await fetch(`api/file${q}`, { headers });
+    if (res.status === 401) { location.reload(); throw new Error('unauthorized'); }
+    if (res.status === 403) return null;
+    if (!res.ok) throw new Error(`api/file: ${res.status}`);
+    const file = await res.json();
+    let related = [];
+    try {
+      const r = await fetch(`api/related${q}`, { headers });
+      if (r.ok) related = (await r.json()).related || [];
+    } catch (err) {
+      console.error('load related', err);
+    }
+    return { file, related };
+  }
+
+  function crumb(path) {
+    const cat = path.split('/')[0];
+    const cl = clusters()[clusterOf(path)];
+    return `<div class="crumb sc">
+      <a href="#read">← Read</a><span>·</span><span>${esc(cat)}</span>
+      ${cl ? `<span>·</span><span><i>${esc(cl.numeral)}</i> ${esc(constellationName(cl.label))}</span>` : ''}
+      <button class="sc x" type="button" aria-label="Close">esc</button></div>`;
+  }
+
+  function lightNote() {
+    if (!note || mode !== 'note') return;
+    const secondary = note.related.flatMap((r) => scene.chunksOf(r.path));
+    scene.highlight(scene.chunksOf(note.path), { color: NOTE_COLOR, secondary });
+  }
+
+  function renderNote() {
+    const { path, file: f, related } = note;
+    const fragments = f.chunk_count || scene.chunksOf(path).length;
+    const plural = (n, w) => `${fmtInt(n)} ${w}${n === 1 ? '' : 's'}`;
+    const meta = [
+      f.confidence && `${f.confidence} confidence`,
+      f.source,
+      relativeTime(f.updated),
+      fragments && plural(fragments, 'fragment'),
+      plural(f.word_count || 0, 'word'),
+      plural(f.access_count || 0, 'read'),
+    ].filter(Boolean);
+    const top = related.length ? related[0].score : 1;
+    noteView.innerHTML = `${crumb(path)}
+      <div class="nv">
+        <h2 class="nt">${esc(f.title || path)}</h2>
+        <div class="sc meta">${meta.map(esc).join(' · ')}</div>
+        ${(f.tags || []).length ? `<div class="tags">${f.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+        <div class="md">${renderMarkdown(noteBody(f.content, f.title))}</div>
+        <div class="near">
+          <div class="sc">Nearest in the sky</div>
+          ${related.map((r) => `
+            <div class="ri2" role="link" tabindex="0" data-path="${esc(r.path)}">
+              <span class="rn2">${esc(clusters()[r.cluster]?.numeral || '·')}</span>
+              <span class="t">${esc(r.title)}</span>
+              <span class="bar"><i style="width:${Math.max(6, Math.round((r.score / top) * 100))}%"></i></span>
+            </div>`).join('') || '<div class="empty sc">no close neighbours yet</div>'}
+        </div>
+      </div>`;
+    for (const pre of noteView.querySelectorAll('.md pre')) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'copy sc';
+      b.textContent = 'copy';
+      pre.appendChild(b);
+    }
+  }
+
+  function renderPin(path, wrong) {
+    noteView.innerHTML = `${crumb(path)}
+      <form class="nv pin">
+        <h2 class="nt">Vault</h2>
+        <div class="sc meta">${wrong ? '<span class="co">wrong pin</span>' : 'this note is locked'}</div>
+        <div class="filter"><span class="ic" aria-hidden="true"></span>
+          <input type="password" inputmode="numeric" autocomplete="off" placeholder="Vault PIN…" aria-label="Vault PIN"></div>
+      </form>`;
+    const form = noteView.querySelector('form');
+    form.querySelector('input').focus();
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      pin = form.querySelector('input').value;
+      openNote(path, { force: true, retry: true });
+    });
+  }
+
+  async function openNote(path, { force = false, retry = false } = {}) {
+    mode = 'note';
+    listView.hidden = true;
+    noteView.hidden = false;
+    hover(null);
+    if (!force && note?.path === path) { lightNote(); return; }
+    const token = ++opening;
+    if (note?.path !== path) {
+      note = null;
+      noteView.innerHTML = `${crumb(path)}<div class="nv"><div class="empty sc">loading…</div></div>`;
+    }
+    let got;
+    try {
+      got = await fetchNote(path);
+    } catch (err) {
+      console.error('load note', err);
+      if (token === opening) noteView.innerHTML = `${crumb(path)}<div class="nv"><div class="empty sc">note not found</div></div>`;
+      return;
+    }
+    if (token !== opening || mode !== 'note') return;
+    if (!got) {
+      if (retry) pin = '';
+      renderPin(path, retry);
+      return;
+    }
+    const scroll = note?.path === path ? noteView.querySelector('.nv')?.scrollTop : 0;
+    note = { path, ...got };
+    renderNote();
+    const nv = noteView.querySelector('.nv');
+    if (nv) nv.scrollTop = scroll || 0;
+    lightNote();
+  }
+
+  noteView.addEventListener('click', async (e) => {
+    if (e.target.closest('.x')) { onClose(); return; }
+    const copy = e.target.closest('.copy');
+    if (copy) {
+      copy.textContent = (await copyText(copy.parentElement.querySelector('code')?.textContent ?? '')) ? 'copied' : 'copy failed';
+      setTimeout(() => { copy.textContent = 'copy'; }, 1500);
+      return;
+    }
+    const row = e.target.closest('.ri2');
+    if (row) onOpen(row.dataset.path);
+  });
+  noteView.addEventListener('keydown', (e) => {
+    const row = e.target.closest('.ri2');
+    if (row && e.key === 'Enter') onOpen(row.dataset.path);
+  });
+  // Hovering a neighbour lights it in gold beside the note.
+  noteView.addEventListener('mouseover', (e) => {
+    const row = e.target.closest('.ri2');
+    if (row) scene.highlight(scene.chunksOf(row.dataset.path), { color: NOTE_COLOR, secondary: scene.chunksOf(note?.path) });
+  });
+  noteView.addEventListener('mouseout', (e) => {
+    const row = e.target.closest('.ri2');
+    if (row && !row.contains(e.relatedTarget)) lightNote();
+  });
+
   async function showList() {
     mode = 'list';
     listView.hidden = false;
     noteView.hidden = true;
+    hover(null);
     renderChips();
     renderList();
     await load();
@@ -184,13 +366,18 @@ export function mountReader(el, { api, scene, data, onClose, onOpen }) {
 
   return {
     showList,
+    showNote: (path) => openNote(path),
     get mode() { return mode; },
-    // markStale reloads the list next time (after brain writes).
-    markStale() { stale = true; if (mode === 'list' && !el.hidden) load().then(renderList); },
-    leave() { hover(null); },
+    get note() { return note; },
+    // markStale reloads the list next time (after brain writes); an open
+    // note is read again so edits show up.
+    markStale() {
+      stale = true;
+      if (el.hidden) return;
+      if (mode === 'list') load().then(renderList);
+      else if (note) openNote(note.path, { force: true });
+    },
+    leave() { hover(null); mode = 'list'; },
     get rows() { return [...listEl.querySelectorAll('.li')].map((r) => r.dataset.path); },
-    // Note view hooks, filled in by the note module.
-    listView, noteView,
-    setMode(m) { mode = m; listView.hidden = m !== 'list'; noteView.hidden = m !== 'note'; },
   };
 }

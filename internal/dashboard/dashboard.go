@@ -192,6 +192,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/plugins", auth(s.handlePlugins))
 	mux.HandleFunc("/api/plugins/run", auth(s.handlePluginRun))
 	mux.HandleFunc("/api/events", auth(s.handleEvents))
+	mux.HandleFunc("/api/related", auth(s.handleRelated))
 }
 
 // withAuth wraps a handler with PIN and/or SSO authentication if configured.
@@ -744,12 +745,16 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 	type response struct {
-		Path       string   `json:"path"`
-		Title      string   `json:"title"`
-		Tags       []string `json:"tags"`
-		Confidence string   `json:"confidence"`
-		Content    string   `json:"content"`
-		Updated    string   `json:"updated"`
+		Path        string   `json:"path"`
+		Title       string   `json:"title"`
+		Tags        []string `json:"tags"`
+		Confidence  string   `json:"confidence"`
+		Source      string   `json:"source"`
+		Content     string   `json:"content"`
+		Updated     string   `json:"updated"`
+		WordCount   int      `json:"word_count"`
+		AccessCount int      `json:"access_count"`
+		ChunkCount  int      `json:"chunk_count"`
 	}
 
 	path := r.URL.Query().Get("path")
@@ -769,14 +774,23 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, response{
-		Path:       bf.Path,
-		Title:      brain.Title(bf.Path, bf.Content),
-		Tags:       bf.Tags,
-		Confidence: bf.Confidence,
-		Content:    strings.TrimSpace(bf.Content),
-		Updated:    bf.Updated.Time.Format(brain.DateFormat),
-	})
+	res := response{
+		Path:        bf.Path,
+		Title:       brain.Title(bf.Path, bf.Content),
+		Tags:        bf.Tags,
+		Confidence:  bf.Confidence,
+		Source:      bf.Source,
+		Content:     strings.TrimSpace(bf.Content),
+		Updated:     bf.Updated.Time.Format(brain.DateFormat),
+		WordCount:   len(strings.Fields(bf.Content)),
+		AccessCount: bf.AccessCount,
+	}
+	if idx, _ := s.brain.LoadFullIndexCached(); idx != nil {
+		if d, ok := idx.Documents[bf.Path]; ok {
+			res.WordCount, res.ChunkCount = d.WordCount, d.ChunkCount
+		}
+	}
+	writeJSON(w, res)
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {

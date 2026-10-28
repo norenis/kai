@@ -15,6 +15,7 @@ agent:
   name: Demo
 brain:
   path: $WORK/brain
+  vault_pin: "2468"
   embeddings:
     provider: lsi
 sessions_path: $WORK/sessions
