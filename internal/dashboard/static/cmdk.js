@@ -244,6 +244,9 @@ export function mountSearch(el, { api, scene, labels, clusters, llm, onOpen, onT
   function hide() {
     if (!open) return;
     open = false;
+    // Blur now: the browser only moves focus off a hidden input at its next
+    // rendering update, and until then "/" would count as typing.
+    if (el.contains(document.activeElement)) document.activeElement.blur();
     el.hidden = true;
     ctrl?.abort();
     scene.highlight([]);
