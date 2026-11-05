@@ -13,7 +13,7 @@
 - **UI:** dashboard in `internal/dashboard` (Go templates + plain ES modules, no build step, embedded via `go:embed`; three.js vendored under `static/vendor`). Playwright tests in `tests/e2e`.
 - **Git flow:** `GITFLOW.md`
 - **Read first:** `ARCHITECTURE.md` (package map and data flow before adding a package or provider); `DESIGN.md` for dashboard work.
-- **Handoff:** `private/handoff/INDEX.md` (local only, `private/` is git-excluded via `.git/info/exclude`), maintained by the shared `handoff` and `resume-handoff` skills.
+- **Handoff:** `private/handoff/INDEX.md` (local only, `private/` is git-excluded via `.git/info/exclude`), maintained by the shared `handoff` and `resume-handoff` skills; the kai-only steps are under "Handoff extras" and "Resume extras" below.
 - **Workflow options:** parallel task agents: 1; per-task review: off
 - **Language:** English in the repo (code, comments, UI, commits). Some older commit subjects are Vietnamese; do not repeat that.
 
@@ -30,3 +30,20 @@
 - **Config:** `config.yaml`; providers `claude`, `openai`, `gemini`, `ollama`; embeddings `lsi` (built-in) or `ollama`.
 - **Unit tests** sit beside source as `*_test.go`; commits are signed.
 - Go may be missing from a non-login shell PATH on the dev machine: use a login shell, or the Docker Go image named in `private/specs/001-fluctlight-hub/plan.md`.
+
+## Handoff and resume extras
+
+### Handoff extras
+Done on top of the shared `handoff` skill. The kai handoff stays local: `private/handoff/` is untracked on purpose, never stage or commit it.
+- Task status: count `- [x]` and `- [ ]` in `private/specs/001-fluctlight-hub/tasks.md`, list every open box with its note, and say which checkpoint in `private/specs/001-fluctlight-hub/plan.md` was last approved.
+- Build and tests: `make build`, `go vet ./...`, `make test` (Docker Go image from the plan if `go` is not on PATH); record the e2e result if dashboard code changed.
+- Before any commit: `python3 -I tasks/private-terms-check.py` passes on the staged changes (public repo, no real brain data).
+- Leftovers: stray dashboard servers (`pgrep -fl "kai dashboard"`, ports 9234 and 8080), `/tmp` scripts the next session needs, containers started by tests.
+- Next steps name the task id in `private/specs/001-fluctlight-hub/tasks.md`; mark steps that need the owner (push, tag, deploy).
+
+### Resume extras
+Done on top of the shared `resume-handoff` skill:
+- Expected branch: the current feature branch of the open release (see `GITFLOW.md`), today `release/albatross/001-fluctlight-hub`.
+- Read `private/specs/001-fluctlight-hub/plan.md` (commands, checkpoints, risks) and the open boxes in its `tasks.md`; read `specs/001-fluctlight-hub/spec.md` only for the sections the next task touches.
+- Run `make build && make test` and `go vet ./...` before continuing; check the leftovers listed in the handoff, and do not kill processes you did not start.
+- Tick a task box only with evidence and note how it was verified. Never push, tag or deploy without the owner's OK in the conversation.
