@@ -2,7 +2,7 @@
 
 How this repo uses git. Agents follow it for branches, commits, merges and tags. It can only add restrictions: pushing, merging into `main` or a release main, and creating deploy tags always need the owner's OK in the conversation, whatever this file says.
 
-## Model: release-train (target; not yet in use)
+## Model: release-train (in use since 2026-11-05)
 | Branch | Name | Created from | Merges into | Rules |
 |---|---|---|---|---|
 | Main | `main` | - | - | latest released code; no direct commits |
@@ -15,13 +15,11 @@ How this repo uses git. Agents follow it for branches, commits, merges and tags.
 
 Names: lowercase kebab-case, ASCII. Never create a bare `release/<release>` branch. Delete feature, fix, hotfix, request and integration branches after merge or drop. Worktrees: none in use.
 
-## Current branches (switch to the release-train not yet scheduled)
+## Current branches (switched 2026-11-05, the owner agreed in the conversation)
 - `main` (origin/main): released code, tags `v1.0.2`, `v1.1.0`, `v1.2.0` and earlier.
-- `feat/fluctlight-hub`: local only, never pushed (the public repo takes no real brain data); dashboard redesign, spec in `specs/001-fluctlight-hub/`, plan kept local in `private/`.
-- `feat/incremental-indexing`: also on origin.
-- `feat/dashboard-oidc-sso`: local.
-
-Steps to switch (not executed): 1) the first release is `albatross`; 2) create `release/<release>/main` from `main`; 3) rename or recreate `feat/fluctlight-hub` as `release/<release>/001-fluctlight-hub` (numbers follow `specs/NNN`) and the other two `feat/*` likewise; 4) retarget merges to the release main; 5) ship by merging the release main into `main`, then tag.
+- First release: `albatross`, `release/albatross/main` created from `main`.
+- `release/albatross/001-fluctlight-hub` (formerly `feat/fluctlight-hub`): dashboard redesign, spec in `specs/001-fluctlight-hub/`, plan kept local in `private/`. It also carries the OIDC SSO login commit (formerly `feat/dashboard-oidc-sso`).
+- Deleted as already merged: `feat/incremental-indexing` (fully in `main`) and `feat/dashboard-oidc-sso` (fully in the fluctlight-hub branch).
 
 ## Release names
 Birds, in this order (agreed 2026-11-05); the next release takes the next unused name; after the last, restart with `-2`. Skip a name equal to the product name.
@@ -30,7 +28,7 @@ albatross, bittern, curlew, dunlin, egret, falcon, godwit, heron, ibis, jay, kes
 
 | Release | Release main created | Status | Features |
 |---|---|---|---|
-| andromeda (proposal) | not created | - | fluctlight-hub, incremental-indexing, dashboard-oidc-sso |
+| albatross | 2026-11-05 | open | 001-fluctlight-hub |
 
 ## Deploy tags
 - Existing releases use `v*` tags (`v1.2.0`), which trigger the GitHub Actions release build. Keep them for public releases.
