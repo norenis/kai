@@ -13,7 +13,7 @@
 - **UI:** dashboard in `internal/dashboard` (Go templates + plain ES modules, no build step, embedded via `go:embed`; three.js vendored under `static/vendor`). Playwright tests in `tests/e2e`.
 - **Git flow:** `GITFLOW.md`
 - **Read first:** `ARCHITECTURE.md` (package map and data flow before adding a package or provider); `DESIGN.md` for dashboard work.
-- **Handoff:** `private/handoff/INDEX.md` (local only, `private/` is git-excluded via `.git/info/exclude`), maintained by the shared `handoff` and `resume-handoff` skills; the kai-only steps are under "Handoff extras" and "Resume extras" below.
+- **Handoff:** `handoffs:auto` (central private repo, folder from the folder rule; shared `handoff` and `resume-handoff` skills); the kai-only steps are under "Handoff extras" and "Resume extras" below.
 - **Workflow options:** parallel task agents: 1; per-task review: off
 - **Language:** English in the repo (code, comments, UI, commits). Some older commit subjects are Vietnamese; do not repeat that.
 
@@ -34,7 +34,7 @@
 ## Handoff and resume extras
 
 ### Handoff extras
-Done on top of the shared `handoff` skill. The kai handoff stays local: `private/handoff/` is untracked on purpose, never stage or commit it.
+Done on top of the shared `handoff` skill. The kai handoff lives in the central private handoff repo, never in this public repo.
 - Task status: count `- [x]` and `- [ ]` in `private/specs/001-fluctlight-hub/tasks.md`, list every open box with its note, and say which checkpoint in `private/specs/001-fluctlight-hub/plan.md` was last approved.
 - Build and tests: `make build`, `go vet ./...`, `make test` (Docker Go image from the plan if `go` is not on PATH); record the e2e result if dashboard code changed.
 - Before any commit: `python3 -I tasks/private-terms-check.py` passes on the staged changes (public repo, no real brain data).
